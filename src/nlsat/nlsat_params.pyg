@@ -1,0 +1,25 @@
+
+def_module_params('nlsat', 
+                  description='nonlinear solver',
+                  export=True,
+                  params=(max_memory_param(),
+                          ('linxi_simple_check', BOOL, False, "linxi precheck about variables sign"),
+                          ('linxi_variable_ordering_strategy', UINT, 0, "linxi Variable Ordering Strategy, 0 for none, 1 for BROWN, 2 for TRIANGULAR, 3 for ONLYPOLY"),
+                          ('wzh_sample', BOOL, True, "wzh sample projection"),
+                          ('linxi_symmetry_check', BOOL, False, "linxi symmetry check and learning"),
+                          ('linxi_set_0_more', BOOL, True, "linxi set 0 as more as we can"),
+                          
+                          ('lazy', UINT, 0, "how lazy the solver is."),
+                          ('reorder', BOOL, True, "reorder variables."),
+                          ('log_lemmas', BOOL, False, "display lemmas as self-contained SMT formulas"),
+                          ('check_lemmas', BOOL, False, "check lemmas on the fly using an independent nlsat solver"),
+                          ('simplify_conflicts', BOOL, True, "simplify conflicts using equalities before resolving them in nlsat solver."),
+                          ('minimize_conflicts', BOOL, False, "minimize conflicts"),
+                          ('randomize', BOOL, True, "randomize selection of a witness in nlsat."),
+                          ('max_conflicts', UINT, UINT_MAX, "maximum number of conflicts."),
+                          ('shuffle_vars', BOOL, False, "use a random variable order."),
+                          ('inline_vars', BOOL, False, "inline variables that can be isolated from equations (not supported in incremental mode)"),
+                          ('seed', UINT, 0, "random seed."),
+                          ('factor', BOOL, True, "factor polynomials produced during conflict resolution.")
+                          ))         
+                
