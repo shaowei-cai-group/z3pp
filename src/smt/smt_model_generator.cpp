@@ -418,6 +418,9 @@ namespace smt {
                 std::string var_value;
                 solver->print_var_solution(var_name,var_value);
                 num=rational(var_value.c_str()).get_rational();
+                if(num>rational("1000000000")){
+                    throw default_exception("large num");
+                }
                 val=a_fac.mk_num_value(num,true);//只要在此处将val赋值便可以了
                 register_value(val);
                 m_asts.push_back(val);

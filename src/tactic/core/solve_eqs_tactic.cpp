@@ -38,7 +38,6 @@ class solve_eqs_tactic : public tactic {
         expr_replacer *               m_r;
         bool                          m_r_owner;
         arith_util                    m_a_util;
-        bv_util                       m_bv_util;
         obj_map<expr, unsigned>       m_num_occs;
         unsigned                      m_num_steps;
         unsigned                      m_num_eliminated_vars;
@@ -64,7 +63,6 @@ class solve_eqs_tactic : public tactic {
             m_r(r),
             m_r_owner(r == nullptr || owner),
             m_a_util(m),
-            m_bv_util(m),
             m_num_steps(0),
             m_num_eliminated_vars(0),
             m_marked_candidates(m),
@@ -200,17 +198,6 @@ class solve_eqs_tactic : public tactic {
             else if (m_a_util.is_ge(f, lhs, rhs) && m_a_util.is_numeral(rhs, val) && val.is_pos()) {
                 m_nonzero.mark(lhs);
             }
-            else if (m_bv_util.is_bv_sle(f, lhs, rhs) && m_bv_util.is_numeral(rhs, val) &&
-                m_bv_util.norm(val, m_bv_util.get_bv_size(rhs), true).is_neg()) { // lhs <= c
-                m_nonzero.mark(lhs);
-            }
-            else if (m_bv_util.is_bv_sle(f, lhs, rhs) && m_bv_util.is_numeral(lhs, val) &&
-                m_bv_util.norm(val, m_bv_util.get_bv_size(lhs)).is_pos()) { // c <= rhs
-                m_nonzero.mark(rhs);
-            }
-            else if (m_bv_util.is_bv_ule(f, lhs, rhs) && m_bv_util.is_numeral(lhs, val) && val.is_pos()) { // c <= rhs
-                m_nonzero.mark(rhs);
-            }
             else if (m().is_not(f, f)) {
                 if (m_a_util.is_le(f, lhs, rhs) && m_a_util.is_numeral(rhs, val) && !val.is_neg()) {
                     m_nonzero.mark(lhs);
@@ -220,23 +207,6 @@ class solve_eqs_tactic : public tactic {
                 }
                 else if (m().is_eq(f, lhs, rhs) && m_a_util.is_numeral(rhs, val) && val.is_zero()) {
                     m_nonzero.mark(lhs);                    
-                }
-                else if (m_bv_util.is_bv_sle(f, lhs, rhs) && m_bv_util.is_numeral(rhs, val) &&
-                    !m_bv_util.norm(val, m_bv_util.get_bv_size(rhs)).is_neg()) { // not (lhs <= c) => lhs > c
-                  m_nonzero.mark(lhs);
-                }
-                else if (m_bv_util.is_bv_sle(f, lhs, rhs) && m_bv_util.is_numeral(lhs, val) &&
-                    !m_bv_util.norm(val, m_bv_util.get_bv_size(lhs)).is_pos()) { // not (c <= rhs) => rhs < c
-                  m_nonzero.mark(rhs);
-                }
-                else if (m_bv_util.is_bv_ule(f, lhs, rhs) && m_bv_util.is_numeral(rhs, val)) { // not (lhs <= c) => lhs > c
-                  m_nonzero.mark(lhs);
-                }
-                else if (m().is_eq(f, lhs, rhs) && m_bv_util.is_numeral(rhs, val) && val.is_zero()) {
-                  m_nonzero.mark(lhs);
-                }
-                else if (m().is_eq(f, lhs, rhs) && m_bv_util.is_numeral(lhs, val) && val.is_zero()) {
-                  m_nonzero.mark(rhs);
                 }
             }            
         }
@@ -377,124 +347,6 @@ class solve_eqs_tactic : public tactic {
             }
             return false;
         }
-
-        bool solve_bv_arith_core(app * lhs, expr * rhs, expr * eq, app_ref & var, expr_ref & def, proof_ref & pr) {
-            expr_ref a(m()), addend(m());
-            if (!linear_bv_term(lhs, a, var, addend, rhs)) {
-              return false;
-            }
-            rational a_val;
-            m_bv_util.is_numeral(a, a_val);
-
-            expr_ref inv_a(m());
-            rational inv_a_val;
-            if (!a_val.is_one()) {
-                // calculate 1/a by gcd
-                rational tmp;
-                gcd(a_val, rational::power_of_two(m_bv_util.get_bv_size(var)), inv_a_val, tmp);
-                m_bv_util.norm(inv_a_val, m_bv_util.get_bv_size(var));
-                inv_a = m_bv_util.mk_numeral(inv_a_val, m_bv_util.get_bv_size(var));
-                def   = m_bv_util.mk_bv_mul(inv_a, m_bv_util.mk_bv_sub(rhs, addend));
-            }
-            else {
-              def = m_bv_util.mk_bv_sub(rhs, addend);
-            }
-            
-            if (m_produce_proofs)
-                pr = m().mk_rewrite(eq, m().mk_eq(var, def));
-            return true;
-        }
-
-        bool linear_bv_term (app *term, expr_ref &factor, app_ref &var, expr_ref &addend, expr *eq_other) {
-          unsigned bound = 100;
-          return linear_bv_term_bound(term, factor, var, addend, bound, eq_other);
-        }
-
-        bool linear_bv_term_bound (app *term, expr_ref &factor, app_ref &var, expr_ref &addend, unsigned &bound, expr *eq_other) {
-          if (bound == 0) { return false; }
-          if (!m_bv_util.is_bv(term)) { return false; }
-          bound--;
-
-
-          if (is_uninterp_const(term) && !m_candidate_vars.is_marked(term) && check_occs(term) && !occurs(term, eq_other)) {
-            factor = m_bv_util.mk_numeral(rational(1), m_bv_util.get_bv_size(term));
-            var    = term;
-            addend = m_bv_util.mk_numeral(rational(0), m_bv_util.get_bv_size(term));
-            return true;
-          }
-          else if (m_bv_util.is_bv_not(term)) {
-            /* term = ~subterm
-             *      = -1 - subterm
-             *      = -1 - (factor * var + addend)
-             *      = (-factor) * var + (-1 -addend)
-             *      = (-factor) * var + ~addend
-             */
-            app* nterm = to_app(to_app(term)->get_arg(0));
-            if (!linear_bv_term_bound(nterm, factor, var, addend, bound, eq_other)) {
-              return false;
-            }
-            addend = m_bv_util.mk_bv_not(addend);
-            rational val;
-            m_bv_util.is_numeral(factor, val); 
-            val.neg();
-            factor = m_bv_util.mk_numeral(val, m_bv_util.get_bv_size(factor));
-            return true;
-          }
-          else if (m_bv_util.is_bv_add(term)) {
-            /* term = e0 + e1
-             *      = (factor * var + addend) + e1
-             *      = factor * var + (e1 + addend)
-             */
-            for (unsigned i = 0; i < to_app(term)->get_num_args(); ++i) {
-              expr *curr = to_app(term)->get_arg(i);
-              if (is_app(curr) && linear_bv_term_bound(to_app(curr), factor, var, addend, bound, eq_other)) {
-                if (occurs(var, addend)) {
-                  continue;
-                }
-                expr_ref_buffer args(m());
-                for (unsigned j = 0; j < to_app(term)->get_num_args(); ++j) {
-                  if (i != j) {
-                    args.push_back(to_app(term)->get_arg(j));
-                  }
-                }
-                args.push_back(addend);
-                SASSERT(args.size() >= 2);
-                addend = m().mk_app(m_bv_util.get_fid(), to_app(term)->get_decl_kind(), args.size(), args.data());
-                return true;
-              }
-            }
-          }
-          else if (m_bv_util.is_bv_mul(term)) {
-            /* term = e0 * e1
-             *      = e0 * (factor * var + addend)
-             *      = (e0 * factor) * var + e0 * addend
-             *      = (other * factor) * var + other * addend
-             */
-            rational val;
-            if (m_bv_util.is_numeral(to_app(term)->get_arg(0), val) && val.is_odd()) {
-              expr_ref mul(m());
-              if (to_app(term)->get_num_args() == 2) {
-                mul = to_app(term)->get_arg(1);
-              }
-              else {
-                SASSERT(to_app(term)->get_num_args() > 2);
-                mul = m().mk_app(m_bv_util.get_fid(), to_app(term)->get_decl_kind(), to_app(term)->get_num_args() - 1, to_app(term)->get_args() + 1);
-              }
-              
-              if (is_app(mul) && linear_bv_term_bound(to_app(mul), factor, var, addend, bound, eq_other) &&
-                  !occurs(var, addend)) {
-                rational f_val;
-                if (m_bv_util.is_numeral(factor, f_val)) {
-                  f_val = val * f_val;
-                  factor = m_bv_util.mk_numeral(f_val, m_bv_util.get_bv_size(factor));
-                  addend = m_bv_util.mk_bv_mul(addend, m_bv_util.mk_numeral(val, m_bv_util.get_bv_size(addend)));
-                  return true;
-                }
-              }
-            }
-          }
-          return false;
-        }
         
         bool solve_arith(expr * lhs, expr * rhs, expr * eq, app_ref & var, expr_ref & def, proof_ref & pr) {
             return 
@@ -504,17 +356,6 @@ class solve_eqs_tactic : public tactic {
                 (m_a_util.is_mod(rhs) && solve_mod(rhs, lhs, eq, var, def, pr));                 
         }
 
-        // TODO: solve_mod for bv
-        bool solve_bv_arith(expr * lhs, expr * rhs, expr * eq, app_ref & var, expr_ref & def, proof_ref & pr) {
-            return 
-                ((m_bv_util.is_bv_add(lhs) || m_bv_util.is_bv_mul(lhs) ||
-                  m_bv_util.is_bv_not(lhs)) && solve_bv_arith_core(to_app(lhs), rhs, eq, var, def, pr)) ||
-                ((m_bv_util.is_bv_add(rhs) || m_bv_util.is_bv_mul(rhs) ||
-                  m_bv_util.is_bv_not(rhs)) && solve_bv_arith_core(to_app(rhs), lhs, eq, var, def, pr));
-            // || (m_bv_util.is_bv_urem(lhs) && solve_mod(lhs, rhs, eq, var, def, pr)) ||
-            //     (m_bv_util.is_bv_urem(rhs) && solve_mod(rhs, lhs, eq, var, def, pr));                 
-        }
-
                 
         bool solve_eq(expr* arg1, expr* arg2, expr* eq, app_ref& var, expr_ref & def, proof_ref& pr) {
             if (trivial_solve(arg1, arg2, var, def, pr))
@@ -522,8 +363,6 @@ class solve_eqs_tactic : public tactic {
             if (m_theory_solver) {
                 if (solve_arith(arg1, arg2, eq, var, def, pr))
                     return true;
-                if (solve_bv_arith(arg1, arg2, eq, var, def, pr))
-                  return true;
             }
             return false;
         }

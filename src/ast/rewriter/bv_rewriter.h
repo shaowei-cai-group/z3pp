@@ -64,7 +64,6 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     bool       m_le_extra;
 
     bool is_zero_bit(expr * x, unsigned idx);
-    bool is_one_bit(expr * x, unsigned idx);
 
     br_status mk_ule(expr * a, expr * b, expr_ref & result);
     br_status mk_uge(expr * a, expr * b, expr_ref & result);
@@ -90,7 +89,6 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     bool resolution(expr_ref_buffer &args, unsigned int i, unsigned int j, expr_fast_mark2 &is_res);
     bool subst_bv_or(expr_ref_buffer &args, unsigned int i, unsigned int j, expr_fast_mark2 &is_res);
     bool subsum_bv_or(expr_ref_buffer &args, unsigned int i, unsigned int j, expr_fast_mark2 &is_res);
-    bool urem_add(expr_ref_buffer &args, unsigned int i, unsigned int j, expr_fast_mark2 &is_res);
     bool square_apply(expr_ref_buffer &args, Proc proc);
 
     br_status mk_bv_not(expr * arg, expr_ref & result);
@@ -151,8 +149,6 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     void mk_t1_add_t2_eq_c(expr * t1, expr * t2, expr * c, expr_ref & result);
     bool norm_eq(expr *&lhs, expr *&rhs);
     bool is_always_unequal(expr *lhs, expr *rhs);
-    bool is_always_equal(expr *lhs, expr *rhs);
-    bool is_the_same(unsigned num, expr * const *args1, expr * const *args2);
 
     bool is_concat_split_target(expr * t) const;
 
@@ -161,7 +157,6 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     bool isolate_term(expr* lhs, expr* rhs, expr_ref & result);
     bool has_numeral(app* e) const;
     bool is_concat_target(expr* lhs, expr* rhs) const;
-    bool is_bv_neg(expr *arg, expr_ref &neg);
 
     void updt_local_params(params_ref const & p);
 

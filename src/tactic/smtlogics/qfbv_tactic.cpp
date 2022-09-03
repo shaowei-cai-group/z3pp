@@ -37,14 +37,14 @@ static tactic * mk_qfbv_preamble(ast_manager& m, params_ref const& p) {
 
     params_ref solve_eq_p;
     // conservative gaussian elimination.
-    solve_eq_p.set_uint("solve_eqs_max_occs", 7);
+    solve_eq_p.set_uint("solve_eqs_max_occs", 2);
 
     params_ref simp2_p = p;
     simp2_p.set_bool("som", true);
     simp2_p.set_bool("pull_cheap_ite", true);
     simp2_p.set_bool("push_ite_bv", false);
-    simp2_p.set_bool("local_ctx", true);
-    simp2_p.set_uint("local_ctx_limit", 10000000);
+    // simp2_p.set_bool("local_ctx", true);
+    // simp2_p.set_uint("local_ctx_limit", 10000000);
     simp2_p.set_bool("flat", true); // required by som
     simp2_p.set_bool("hoist_mul", false); // required by som
 
@@ -75,8 +75,7 @@ static tactic * mk_qfbv_preamble(ast_manager& m, params_ref const& p) {
 
 static tactic * main_p(tactic* t) {
     params_ref p;
-    p.set_bool("elim_and", false);
-    p.set_bool("elim_or", true);
+    p.set_bool("elim_and", true);
     p.set_bool("push_ite_bv", true);
     p.set_bool("blast_distinct", true);
     return using_params(t, p);
@@ -105,14 +104,13 @@ static tactic * mk_qfbv_tactic(ast_manager& m, params_ref const & p, tactic* sat
                                        cond(mk_is_qfbv_probe(),
                                             and_then(mk_bit_blaster_tactic(m),
                                                      when(mk_lt(mk_memory_probe(), mk_const_probe(MEMLIMIT)),
-                                                          // and_then(using_params(mk_simplify_tactic(m),
-                                                          //     // and_then(mk_simplify_tactic(m),
-                                                          //     //                            mk_solve_eqs_tactic(m)),
-                                                          //                       local_ctx_p),
+                                                          and_then(using_params(and_then(mk_simplify_tactic(m),
+                                                                                         mk_solve_eqs_tactic(m)),
+                                                                                local_ctx_p),
                                                                    if_no_proofs(cond(mk_produce_unsat_cores_probe(),
                                                                                      mk_aig_tactic(),
                                                                                      using_params(mk_aig_tactic(),
-                                                                                                  big_aig_p)))),
+                                                                                                  big_aig_p))))),
                                                      sat),
 					     //  mk_qfbv_sls_tactic(m),
                                             smt))));
@@ -125,12 +123,9 @@ static tactic * mk_qfbv_tactic(ast_manager& m, params_ref const & p, tactic* sat
 
 tactic * mk_qfbv_tactic(ast_manager & m, params_ref const & p) {
 //	return mk_qfbv_sls_tactic(m, p);
-    params_ref sat_solver_pp(p);
-    sat_solver_pp.set_bool("ext_sat_solver", true); // use external sat solver, e.g. cadical 
-
     tactic * new_sat = cond(mk_produce_proofs_probe(),
                             and_then(mk_simplify_tactic(m), mk_smt_tactic(m, p)),
-                            mk_psat_tactic(m, sat_solver_pp));
+                            mk_psat_tactic(m, p));
     return mk_qfbv_tactic(m, p, new_sat, mk_smt_tactic(m, p));
 
 }

@@ -1032,10 +1032,8 @@ void bit_blaster_tpl<Cfg>::mk_le(unsigned sz, expr * const * a_bits, expr * cons
     expr_ref not_a(m());
     mk_not(a_bits[0], not_a);
     mk_or(not_a, b_bits[0], out);
-    expr_ref tmp(m());
     for (unsigned idx = 1; idx < (Signed ? sz - 1 : sz); idx++) {
         mk_not(a_bits[idx], not_a);
-        tmp = out; // TODO: fixme, use `tmp' to avoid out being free
         mk_ge2(not_a, b_bits[idx], out, out);
     }
     if (Signed) {

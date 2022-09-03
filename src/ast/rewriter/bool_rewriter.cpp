@@ -26,10 +26,6 @@ void bool_rewriter::updt_params(params_ref const & _p) {
     bool_rewriter_params p(_p);
     m_flat                 = p.flat();
     m_elim_and             = p.elim_and();
-    m_elim_or              = p.elim_or();
-    if (m_elim_or) {
-      m_elim_and = false;
-    }
     m_elim_ite             = p.elim_ite();
     m_local_ctx            = p.local_ctx();
     m_local_ctx_limit      = p.local_ctx_limit();
@@ -85,17 +81,6 @@ void bool_rewriter::mk_and_as_or(unsigned num_args, expr * const * args, expr_re
     }
     expr_ref tmp(m());
     mk_or(new_args.size(), new_args.data(), tmp);
-    mk_not(tmp, result);
-}
-void bool_rewriter::mk_or_as_and(unsigned num_args, expr * const * args, expr_ref & result) {
-    expr_ref_buffer new_args(m());
-    for (unsigned i = 0; i < num_args; i++) {
-        expr_ref tmp(m());
-        mk_not(args[i], tmp);
-        new_args.push_back(tmp);
-    }
-    expr_ref tmp(m());
-    mk_and(new_args.size(), new_args.data(), tmp);
     mk_not(tmp, result);
 }
 

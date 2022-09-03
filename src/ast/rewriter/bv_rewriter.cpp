@@ -19,13 +19,8 @@ udiv
 urem
 add
 extract
-concat, not complete
+concate, not complete
 eq
-or
-lshr, ashr
-shl (no addition)
-ite
-TODO: ult, slt
 
 --*/
 #include "params/bv_rewriter_params.hpp"
@@ -456,7 +451,7 @@ br_status bv_rewriter::mk_leq_core(bool is_signed, expr * a, expr * b, expr_ref 
         return BR_DONE;
     }
 
-    if (is_num1) // [Lin] r1 is regular signed integer, but not two's complement mode
+    if (is_num1)
         r1 = m_util.norm(r1, sz, is_signed);
     if (is_num2)
         r2 = m_util.norm(r2, sz, is_signed);
@@ -920,25 +915,6 @@ br_status bv_rewriter::mk_bv_lshr(expr * arg1, expr * arg2, expr_ref & result) {
     unsigned bv_size = get_bv_size(arg1);
     unsigned sz;
 
-    // Bitwuzla
-    // 0 >> r -> 0
-    if (is_numeral(arg1, r1) && r1.is_zero()) {
-      result = mk_numeral(0, bv_size);
-      return BR_DONE;
-    }
-    // a >> a -> 0
-    if (arg1 == arg2) {
-      result = mk_numeral(0, bv_size); 
-      return BR_DONE;
-    }
-    // ~a >> a -> 1111 >> a
-    if ((m_util.is_bv_not(arg1) && to_app(arg1)->get_arg(0) == arg2) ||
-        (m_util.is_bv_not(arg2) && to_app(arg2)->get_arg(0) == arg1)) {
-      result = m_util.mk_bv_lshr(mk_numeral(rational::power_of_two(bv_size) - numeral(1), bv_size), arg2);
-      return BR_REWRITE1;
-    }
-    // end of Bitwuzla
-
     if (is_numeral(arg2, r2, sz)) {
         if (r2.is_zero()) {
             // x >> 0 == x
@@ -995,33 +971,6 @@ br_status bv_rewriter::mk_bv_ashr(expr * arg1, expr * arg2, expr_ref & result) {
     }
 
     bool is_num1 = is_numeral(arg1, r1, bv_size);
-
-    // Bitwuzla
-    // (a ashr b) -> signed ? ~(~a lshr b) : (a lshr b)
-
-    // 0000 ash b -> 000
-    if (is_num1 && r1.is_zero()) {
-      result = mk_numeral(0, bv_size);
-      return BR_DONE;
-    }
-    // 111 ashr b -> 111
-    if (is_num1 && m_util.norm(r1, bv_size, false)== rational::power_of_two(bv_size) - numeral(1)) {
-      result = m_util.mk_numeral(rational::power_of_two(bv_size) - numeral(1), bv_size);
-      return BR_DONE;
-    }
-    // transform to lshr for cases `a ashr a', `~a ashr a'
-    if (arg1 == arg2 ||
-        (m_util.is_bv_not(arg1) && to_app(arg1)->get_arg(0) == arg2) ||
-        (m_util.is_bv_not(arg2) && to_app(arg2)->get_arg(0) == arg1)) {
-      expr *sign_bit = m_util.mk_extract(bv_size - 1, bv_size - 1, arg1);
-      expr_ref ashr1(m_util.mk_bv_lshr(arg1, arg2), m());
-      expr_ref ashr2(m());
-      ashr2 = m_util.mk_bv_not(m_util.mk_bv_lshr(m_util.mk_bv_not(arg1), arg2)); 
-
-      result = m().mk_ite(m().mk_eq(sign_bit, mk_numeral(0, 1)), ashr1, ashr2);
-      return BR_REWRITE3;
-    }
-    // end of Bitwuzla
 
     if (bv_size <= 64 && is_num1 && is_num2) {
         uint64_t n1      = r1.get_uint64();
@@ -1990,7 +1939,7 @@ SWAP_OPERANDS:
     expr *d = to_app(to_app(right)->get_arg(0))->get_arg(1);
     if (eq_not(left, c) || eq_not(left, d)) {
       args.set(i, left);
-      if (j != args.size()) {
+      if (j != args.size() - 1) {
         args.set(j, args[args.size() - 1]);
       }
       args.pop_back();
@@ -2155,28 +2104,8 @@ br_status bv_rewriter::mk_bv_or(unsigned num, expr * const * args, expr_ref & re
             result = m_util.mk_concat(non_zero_args.size(), non_zero_args.data());
             return BR_REWRITE2;
         }
-        // Bitwuzla (modify)
-        // (bvor (concat x #xff) (concat #xff y)) --> #xffff
-        for (i = 0; i < sz; i++)
-            if (!is_one_bit(concat1, i) && !is_one_bit(concat2, i))
-                break;
-        if (i == sz) {
-          result = m_util.mk_numeral(rational::power_of_two(sz) - numeral(1), sz);
-          return BR_DONE;
-        }
-        // TODO
-        /*
-         * match:  (0::a) & (b::0)
-         * result: 0
-         *
-         * match:  (0::a) & (b::1)
-         * result: 0::a
-         *
-         * match: (1::a) & (b::1)
-         * result: b::a
-         */
-        // end of Bitwuzla
     }
+    // TODO (bvor (concat x #xff) (concat #xff y)) --> #xffff
 
     if (!v1.is_zero() && new_args.size() == 1) {
         v1 = m_util.norm(v1, sz);
@@ -2555,7 +2484,7 @@ br_status bv_rewriter::mk_bool_or(unsigned num, expr * const *args, expr_ref &re
         }
         return BR_REWRITE1;
       default:
-        result = m().mk_and(new_args.size(), new_args.data());
+        result = m().mk_or(new_args.size(), new_args.data());
         if (is_rewrited & (1 << 1)) {
           return BR_REWRITE3;
         }
@@ -2808,22 +2737,6 @@ br_status bv_rewriter::mk_bv_not(expr * arg, expr_ref & result) {
         }
     }
 
-    // Bitwuzla for xor
-    if (m_util.is_bv_xor(arg)) {
-      expr_ref_buffer xors(m());
-      xors.push_back(m_util.mk_bv_not(to_app(arg)->get_arg(0)));
-      for (unsigned i = 1; i < to_app(arg)->get_num_args(); ++i) {
-        xors.push_back(to_app(arg)->get_arg(i));
-      }
-      if (xors.size() == 1) {
-        result = xors[0];
-      }
-      else {
-        result = m_util.mk_bv_xor(xors.size(), xors.data());
-      }
-      return BR_REWRITE1;
-    }
-
     return BR_FAILED;
 }
 
@@ -2943,60 +2856,6 @@ br_status bv_rewriter::mk_bv_comp(expr * arg1, expr * arg2, expr_ref & result) {
     return BR_REWRITE2;
 }
 
-
-// -(y / b * b) + y --> y % b
-bool bv_rewriter::urem_add(expr_ref_buffer &args, unsigned int i, unsigned int j, expr_fast_mark2 &is_res) {
-  expr *x = args[i], *y = args[j];
-  struct out{};
-  bool is_swap = false;
-
-SWAP_OPERANDS:
-  expr_ref neg_x(m());
-  expr *udiv = nullptr;
-  expr *b = nullptr;
-  numeral k;
-
-  try {
-    if (is_bv_neg(x, neg_x) && m_util.is_bv_mul(neg_x) && to_app(neg_x)->get_num_args() == 2) {
-      if (m_util.is_bv_udiv(to_app(neg_x)->get_arg(0)) ||
-          m_util.is_bv_udivi(to_app(neg_x)->get_arg(0))) {
-        udiv = to_app(neg_x)->get_arg(0);
-        b = to_app(neg_x)->get_arg(1);
-      }
-      else if (m_util.is_bv_udiv(to_app(neg_x)->get_arg(1)) ||
-          m_util.is_bv_udivi(to_app(neg_x)->get_arg(1))) {
-        udiv = to_app(neg_x)->get_arg(1);
-        b = to_app(neg_x)->get_arg(0);
-      }
-      else {
-        throw out();
-      }
-
-      // SASSERT(!(m_util.is_numeral(b, val) && val.is_zero));
-
-      SASSERT(to_app(udiv)->get_num_args() == 2);
-      if (to_app(udiv)->get_arg(0) == y && to_app(udiv)->get_arg(1) == b) {
-        args.set(i, m_util.mk_bv_urem(y, b));
-        if (j != args.size()) {
-          args.set(j, args[args.size() - 1]);
-        }
-        is_res.mark(args[i]);
-        args.pop_back();
-        return true;
-      }
-    }
-  }
-  catch (const out &) { }
-
-  if (!is_swap) {
-    std::swap(x, y);
-    is_swap = true;
-    goto SWAP_OPERANDS;
-  }
-
-  return false;
-}
-
 br_status bv_rewriter::mk_bv_add(unsigned num_args, expr * const * args, expr_ref & result) {
     br_status st = mk_add_core(num_args, args, result);
     if (st != BR_FAILED && st != BR_DONE) {
@@ -3094,87 +2953,6 @@ br_status bv_rewriter::mk_bv_add(unsigned num_args, expr * const * args, expr_re
     //   return BR_REWRITE2;
     // }
 
-    // urem_add
-    // -(y / b * b) + y --> y % b
-    expr_ref_buffer tmp_args(m());
-    for (unsigned i = 0; i < _num_args; ++i) {
-      tmp_args.push_back(_args[i]);
-    }
-    if (square_apply(tmp_args, &bv_rewriter::urem_add)) {
-      SASSERT(_num_args >= tmp_args.size());
-      if (tmp_args.size() == 1) {
-        result = tmp_args[0];
-        return BR_REWRITE1;
-      }
-      else {
-        SASSERT(tmp_args.size() > 1);
-        result = mk_add_app(tmp_args.size(), tmp_args.data());
-        return BR_REWRITE2;
-      }
-    }
-
-    // match:  ~(c * a) + y
-    // result: ((-c) * a - 1) + y
-    unsigned n = tmp_args.size();
-    bool is_transformed = false;
-    for (unsigned int i = 0; i < n; ++i) {
-      expr *x = tmp_args[i];
-      if (m_util.is_bv_not(x) && m_util.is_bv_mul(to_app(x)->get_arg(0))) {
-        expr *mul = to_app(x)->get_arg(0);
-        numeral c;
-        if(m_util.is_numeral(to_app(mul)->get_arg(0), c)) { // note: const is in the leading position of mul
-          c = -c;
-          normalize(c);
-          expr_ref a(mk_mul_app(to_app(mul)->get_num_args() - 1, to_app(mul)->get_args() + 1), m());
-          tmp_args.set(i, mk_mul_app(c, a));
-          tmp_args.push_back(mk_numeral(-1, sz)); // note: it is ok for `n'
-          is_transformed = true;
-          // expr_ref lhs(m_util.mk_bv_add(mk_mul_app(c, a), mk_numeral(-1, sz)), m());
-          // result = m_util.mk_bv_add(lhs, y);
-          // return BR_REWRITE_FULL;
-        }
-      }
-    }
-    if (is_transformed) {
-      SASSERT(tmp_args.size() > 1);
-      result = mk_add_app(tmp_args.size(), tmp_args.data());
-      return BR_REWRITE2;
-    }
-
-    // match:  (a + (b << a))
-    // result: (a | (b << a))
-    is_transformed = false;
-    for (unsigned i = 0; i < tmp_args.size(); ++i) {
-      if (m_util.is_bv_shl(tmp_args[i])) {
-        expr *shifter = to_app(tmp_args[i])->get_arg(1);
-        for (unsigned j = 0; j < tmp_args.size(); ++j) {
-          if (tmp_args[j] == shifter) {
-            tmp_args.set(i, m_util.mk_bv_or(tmp_args[i], tmp_args[j]));
-            if (j != tmp_args.size() - 1) {
-              tmp_args.set(j, tmp_args[tmp_args.size() - 1]);
-            }
-            tmp_args.pop_back();
-            is_transformed = true;
-            break;
-          }
-        }
-      }
-    }
-    if (is_transformed) {
-      SASSERT(tmp_args.size() > 1);
-      result = mk_add_app(tmp_args.size(), tmp_args.data());
-      return BR_REWRITE2;
-    }
-
-    // pull_ite: (ite c a b) + y if a == 0 or b == 0--> (ite (a + y) (b + y))
-    // conflict with th_rewriter.cpp:push_ite
-    // expr *c = nullptr, *a = nullptr, *b = nullptr;
-    // if (m().is_ite(x, c, a, b) &&
-    //     (m_util.is_zero(a) || m_util.is_zero(b))) {
-    //   result = m().mk_ite(c, m_util.mk_bv_add(a, y), m_util.mk_bv_add(b, y));
-    //   return BR_REWRITE2;
-    // }
-
     if (_num_args != 2) {
       return st;
     }
@@ -3187,7 +2965,6 @@ SWAP_OPERANDS:
 
     // urem_add
     // -(y / b * b) + y --> y % b
-    /*
     try {
       expr *mul = nullptr, *udiv = nullptr;
       expr *b = nullptr;
@@ -3244,15 +3021,6 @@ SWAP_OPERANDS:
       }
     }
 
-    // match:  (a + (b << a))
-    // result: (a | (b << a))
-    if (m_util.is_bv_shl(y) && (x == to_app(y)->get_arg(1))) {
-      result = m_util.mk_bv_or(x, y);
-      return BR_REWRITE1;
-    }
-    */
-
-
     // pull_ite: (ite c a b) + y if a == 0 or b == 0--> (ite (a + y) (b + y))
     // conflict with th_rewriter.cpp:push_ite
     // expr *c = nullptr, *a = nullptr, *b = nullptr;
@@ -3261,6 +3029,16 @@ SWAP_OPERANDS:
     //   result = m().mk_ite(c, m_util.mk_bv_add(a, y), m_util.mk_bv_add(b, y));
     //   return BR_REWRITE2;
     // }
+
+
+
+    // match:  (a + (b << a))
+    // result: (a | (b << a))
+    if (m_util.is_bv_shl(y) && (x == to_app(y)->get_arg(1))) {
+      result = m_util.mk_bv_or(x, y);
+      return BR_REWRITE1;
+    }
+
 
     // match:  a + (a * b)
     // result: (a * (b + 1))
@@ -3455,107 +3233,10 @@ bool bv_rewriter::is_zero_bit(expr * x, unsigned idx) {
     return false;
 }
 
-bool bv_rewriter::is_one_bit(expr * x, unsigned idx) {
-    numeral val;
-    unsigned bv_size;
- loop:
-    if (is_numeral(x, val, bv_size)) {
-        div(val, rational::power_of_two(idx), val);
-        return (val % numeral(2)).is_one();
-    }
-    if (m_util.is_concat(x)) {
-        unsigned i = to_app(x)->get_num_args();
-        while (i > 0) {
-            --i;
-            expr * y = to_app(x)->get_arg(i);
-            bv_size = get_bv_size(y);
-            if (bv_size <= idx) {
-                idx -= bv_size;
-            }
-            else {
-                x = y;
-                goto loop;
-            }
-        }
-        UNREACHABLE();
-    }
-    return false;
-}
-
 br_status bv_rewriter::mk_bv_mul(unsigned num_args, expr * const * args, expr_ref & result) {
     br_status st = mk_mul_core(num_args, args, result);
     if (st != BR_FAILED && st != BR_DONE)
         return st;
-
-    // TODO: both of arg1 and arg2 is bv_not
-    // --------------------------------------------
-    // [Lin] Bitwuzla
-    // --------------------------------------------
-    // (bvmul u (bvshl v w)) --> (bvshl (bvmul u v) w)
-
-    unsigned new_num_args;
-    expr * const *new_args;
-    if (st == BR_FAILED) {
-      new_num_args = num_args;
-      new_args = args;
-    }
-    else if (st == BR_DONE && is_mul(result)) {
-      new_num_args = to_app(result)->get_num_args();
-      new_args = to_app(result)->get_args();
-    }
-    else {
-        return st;
-    }
-    // ptr_buffer<expr> shls;
-    // ptr_buffer<expr> muls;
-    // for (unsigned i = 0; i < new_num_args; ++i) {
-    //   expr *curr = new_args[i];
-    //   if (m_util.is_bv_shl(curr)) {
-    //     muls.push_back(to_app(curr)->get_arg(0));
-    //     shls.push_back(to_app(curr)->get_arg(1));
-    //   }
-    //   else {
-    //     muls.push_back(curr);
-    //   }
-    // }
-    // 
-    // if (shls.size() != 0) { // FIXME: overflow of add
-    //   expr_ref mul_result(mk_mul_app(muls.size(), muls.data()), m());
-    //   expr_ref shl_result(mk_add_app(shls.size(), shls.data()), m());
-    //   result = m_util.mk_bv_shl(mul_result, shl_result);
-    //   return BR_REWRITE2;
-    // }
-    
-    // (-x * -y) --> x * y
-    // (-x * y) --> - (x * y)
-    expr_ref_buffer not_neg_muls(m());
-    unsigned int neg_num = 0;
-    for (unsigned i = 0; i < new_num_args; ++i) {
-      expr *curr = new_args[i];
-      expr_ref neg_curr(m());
-      if (is_bv_neg(curr, neg_curr)) {
-        not_neg_muls.push_back(neg_curr);
-        neg_num++;
-      }
-      else {
-        not_neg_muls.push_back(curr);
-      }
-    }
-    if (neg_num != 0) {
-      if (neg_num % 2 == 1) {
-        result = m_util.mk_bv_neg(mk_mul_app(not_neg_muls.size(), not_neg_muls.data()));
-        return BR_REWRITE2;
-      }
-      else {
-        result = mk_mul_app(not_neg_muls.size(), not_neg_muls.data());
-        return BR_REWRITE1;
-      }
-    }
-
-    // --------------------------------------------
-    // [Lin] end of Bitwuzla
-    // --------------------------------------------
-
     expr * x;
     expr * y;
     if (st == BR_FAILED && num_args == 2) {
@@ -3627,7 +3308,6 @@ br_status bv_rewriter::mk_bv_mul(unsigned num_args, expr * const * args, expr_re
 SWAP_OPERANDS:
     
     // (bvmul u (bvshl v w)) --> (bvshl (bvmul u v) w)
-    // has been finished in the begining
     if (m_util.is_bv_shl(y)) {
       expr_ref mul (m_util.mk_bv_mul(x, to_app(y)->get_arg(0)), m());
       result = m_util.mk_bv_shl(mul, to_app(y)->get_arg(1));
@@ -3653,19 +3333,22 @@ SWAP_OPERANDS:
 
     // (-x * -y) --> x * y
     // (-x * y) --> - (x * y)
-    // expr_ref xx(m()), yy(m());
-    // if (is_bv_neg(x, xx) && is_bv_neg(y, yy)) {
-    //   result = m_util.mk_bv_mul(xx, yy);
-    //   return BR_REWRITE1;
-    // }
-    // else if (is_bv_neg(x, xx)) {
-    //   result = m_util.mk_bv_neg(m_util.mk_bv_mul(xx, y));
-    //   return BR_REWRITE2;
-    // }
-    // else if (is_bv_neg(y, yy)) {
-    //   result = m_util.mk_bv_neg(m_util.mk_bv_mul(x, yy));
-    //   return BR_REWRITE2;
-    // }
+    if (m_util.is_bv_neg(x) && m_util.is_bv_neg(y)) {
+      expr * xx = to_app(x)->get_arg(0);
+      expr * yy = to_app(y)->get_arg(0);
+      result = m_util.mk_bv_mul(xx, yy);
+      return BR_REWRITE1;
+    }
+    else if (m_util.is_bv_neg(x)) {
+      expr *xx = to_app(x)->get_arg(0);
+      result = m_util.mk_bv_neg(m_util.mk_bv_mul(xx, y));
+      return BR_REWRITE2;
+    }
+    else if (m_util.is_bv_neg(y)) {
+      expr *yy = to_app(y)->get_arg(0);
+      result = m_util.mk_bv_neg(m_util.mk_bv_mul(x, yy));
+      return BR_REWRITE2;
+    }
 
     return st;
 }
@@ -4004,82 +3687,10 @@ bool bv_rewriter::is_urem_any(expr * e, expr * & dividend,  expr * & divisor) {
     return true;
 }
 
-bool bv_rewriter::is_the_same(unsigned num, expr * const *args1, expr * const *args2) {
-  expr_fast_mark1 visited;
-  expr_fast_mark2 is_common;
-
-  buffer<unsigned> extra_counter;
-  m_expr2pos.reset(); // expensive case
-
-  for (unsigned i = 0; i < num; ++i) {
-    expr *a = args1[i];
-    if (visited.is_marked(a)) { // appear multiple times
-      unsigned pos;
-      if (m_expr2pos.find(a, pos)) {
-        extra_counter[pos]++;
-      }
-      else {
-        m_expr2pos.insert(a, extra_counter.size());
-        extra_counter.push_back(1);
-      }
-    }
-    else {
-      visited.mark(a);
-    }
-  }
-  for (unsigned i = 0; i < num; ++i) {
-    expr *a = args2[i];
-    if (!visited.is_marked(a)) { // found different arg
-      return false;
-    }
-    else {
-      unsigned pos;
-      if (!is_common.is_marked(a)) { // first time appear in rhs
-        is_common.mark(a);
-      }
-      else if (m_expr2pos.find(a, pos) && extra_counter[pos] > 0) {
-        extra_counter[pos]--;
-      }
-      else {
-        return false; // the number of this arg is more than lhs
-      }
-    }
-  }
-  return true;
-}
-
-// TODO it can't handle mix operators, a + (b or c) = a + (c or b), maybe we should set m_bv_sort_ac
-bool bv_rewriter::is_always_equal(expr *lhs, expr *rhs) {
-  if (lhs == rhs) {
-    return true;
-  }
-  while (m_util.is_bv_not(lhs) && m_util.is_bv_not(rhs)) {
-    lhs = to_app(lhs)->get_arg(0);
-    rhs = to_app(rhs)->get_arg(0);
-  }
-  if (is_app(lhs) && is_app(rhs) &&
-      to_app(lhs)->get_family_id() == to_app(rhs)->get_family_id() &&
-        to_app(lhs)->get_decl_kind() == to_app(rhs)->get_decl_kind() &&
-        to_app(lhs)->get_num_args() == to_app(rhs)->get_num_args() &&
-        (m_util.is_bv_add(lhs) || m_util.is_bv_mul(lhs)
-         || m_util.is_bv_or(lhs) || m_util.is_bv_xor(lhs))) {
-
-    if (is_the_same(to_app(lhs)->get_num_args(), to_app(lhs)->get_args(), to_app(rhs)->get_args())) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 // pre-condition: apply norm_eq
 bool bv_rewriter::is_always_unequal(expr *lhs, expr *rhs) {
   if ((m_util.is_bv_not(lhs) && to_app(lhs)->get_arg(0) == rhs) ||
       (m_util.is_bv_not(rhs) && to_app(rhs)->get_arg(0) == lhs)) {
-    return true;
-  }
-
-  if (is_numeral(lhs) && is_numeral(rhs) && lhs != rhs) {
     return true;
   }
 
@@ -4088,49 +3699,29 @@ bool bv_rewriter::is_always_unequal(expr *lhs, expr *rhs) {
   expr *c0 = nullptr, *a0 = nullptr;
   numeral val;
 
-  // for multi add case
-  if (m_util.is_bv_add(lhs) && to_app(lhs)->get_num_args() > 2
-      && m_util.is_numeral(to_app(lhs)->get_arg(0), val) && !val.is_zero()) {
-    unsigned num = to_app(lhs)->get_num_args() - 1;
-    if (m_util.is_bv_add(rhs) && to_app(rhs)->get_num_args() == num &&
-        is_the_same(num, to_app(lhs)->get_args() + 1, to_app(rhs)->get_args())) {
-      return true;
-    }
-  }
-  if (m_util.is_bv_add(rhs) && to_app(rhs)->get_num_args() > 2
-      && m_util.is_numeral(to_app(rhs)->get_arg(0), val) && !val.is_zero()) {
-    unsigned num = to_app(rhs)->get_num_args() - 1;
-    if (m_util.is_bv_add(lhs) && to_app(lhs)->get_num_args() == num &&
-        is_the_same(num, to_app(rhs)->get_args() + 1, to_app(lhs)->get_args())) {
-      return true;
-    }
-  }
-
-
   expr *tmp_lhs = lhs;
   bool is_not = false;
   if (m_util.is_bv_not(lhs, tmp_lhs)) {
     is_not = true;
   }
-
   // only consider add with two args
   if (m_util.is_bv_add(tmp_lhs, c0, a0) &&
       m_util.is_numeral(c0, val) &&
       !val.is_zero()) {
 
     if (!is_not) {
-      if (is_always_equal(a0, rhs)) {
+      if (a0 == rhs) {
         return true;
       }
     }
     else {
       if (m_util.is_bv_not(a0)) {
-        if (is_always_equal(to_app(a0)->get_arg(0),  rhs)) {
+        if (to_app(a0)->get_arg(0) == rhs) {
           return true;
         }
       }
       else if (m_util.is_bv_not(rhs)) { // It should not happen, as has been normalize `not = not`
-        if (is_always_equal(a0, to_app(rhs)->get_arg(0))) { 
+        if (a0 == to_app(rhs)->get_arg(0)) { 
           return true;
         }
       }
@@ -4148,18 +3739,18 @@ bool bv_rewriter::is_always_unequal(expr *lhs, expr *rhs) {
       !val.is_zero()) {
 
     if (!is_not) {
-      if (is_always_equal(a1, lhs)) {
+      if (a1 == lhs) {
         return true;
       }
     }
     else {
       if (m_util.is_bv_not(a1)) {
-        if (is_always_equal(to_app(a1)->get_arg(0), lhs)) {
+        if (to_app(a1)->get_arg(0) == lhs) {
           return true;
         }
       }
       else if (m_util.is_bv_not(lhs)) {
-        if (is_always_equal(a1, to_app(lhs)->get_arg(0))) {
+        if (a1 == to_app(lhs)->get_arg(0)) {
           return true;
         }
       }
@@ -4203,42 +3794,6 @@ bool bv_rewriter::norm_eq(expr *&lhs, expr *&rhs) {
     return do_normalize;
 }
 
-bool bv_rewriter::is_bv_neg(expr *arg, expr_ref &neg) {
-  if (m_util.is_bv_neg(arg)) {
-    neg = to_app(arg)->get_arg(0);
-    return true;
-  }
-  numeral val;
-  // -x = -1 * x
-  if (m_util.is_bv_mul(arg) && to_app(arg)->get_num_args() == 2) {
-    if (is_minus_one_core(to_app(arg)->get_arg(0))) {
-    // if (m_util.is_numeral(to_app(arg)->get_arg(0), val) && val == numeral(-1)) {
-      val.is_minus_one();
-      neg = to_app(arg)->get_arg(1);
-      return true;
-    }
-    if (is_minus_one_core(to_app(arg)->get_arg(1))) {
-    // if (m_util.is_numeral(to_app(arg)->get_arg(1), val) && val == numeral(-1)) {
-      neg = to_app(arg)->get_arg(0);
-      return true;
-    }
-  }
-
-  // -x = 1 + ~x
-  if (m_util.is_bv_add(arg) && to_app(arg)->get_num_args() == 2) {
-    if (m_util.is_numeral(to_app(arg)->get_arg(0), val) && val.is_one()) {
-      neg = m_util.mk_bv_not(to_app(arg)->get_arg(1));
-      return true;
-    }
-    if (m_util.is_numeral(to_app(arg)->get_arg(1), val) && val.is_one()) {
-      neg = m_util.mk_bv_not(to_app(arg)->get_arg(0));
-      return true;
-    }
-  }
-
-  return false;
-}
-
 br_status bv_rewriter::mk_eq_core(expr * lhs, expr * rhs, expr_ref & result) {
     if (lhs == rhs) {
         result = m().mk_true();
@@ -4251,11 +3806,6 @@ br_status bv_rewriter::mk_eq_core(expr * lhs, expr * rhs, expr_ref & result) {
     }
 
     bool do_normalize = norm_eq(lhs, rhs);
-
-    if (is_always_equal(lhs, rhs)) {
-      result = m().mk_true();
-      return BR_DONE;
-    }
 
     // Bitwuzla alway unequal, after the above normalization
     if (is_always_unequal(lhs, rhs)) {
@@ -4317,13 +3867,12 @@ br_status bv_rewriter::mk_eq_core(expr * lhs, expr * rhs, expr_ref & result) {
     }
 
     // [Lin] TODO also for bv_not_add
-    expr_ref new_lhs(m());
-    expr_ref new_rhs(m());
     if (m_util.is_bv_add(lhs) || m_util.is_bv_mul(lhs) || m_util.is_bv_add(rhs) || m_util.is_bv_mul(rhs)) {
+        expr_ref new_lhs(m());
+        expr_ref new_rhs(m());
+
         // cancel_monomials finish the rewrite for Bitwuzla rule:
         // a + b = a + c -> b = c
-        // This also finish Bitwuzla rule:
-        // c0 = c1 + b -> c0 - c1 = b
         st = cancel_monomials(lhs, rhs, false, new_lhs, new_rhs);
         if (st != BR_FAILED) {
             if (is_numeral(new_lhs) && is_numeral(new_rhs)) {
@@ -4332,26 +3881,37 @@ br_status bv_rewriter::mk_eq_core(expr * lhs, expr * rhs, expr_ref & result) {
             }
             lhs = new_lhs;
             rhs = new_rhs;
+        }
+
+        // Try to rewrite t1 + t2 = c --> t1 = c - t2
+        // Reason: it is much cheaper to bit-blast.
+        //
+        // This also finish Bitwuzla rule
+        // match: c0 = c1 + b
+        // result: c0 - c1 = b
+        //
+        // also handles negated adds:
+        // c0 = ~(c1 + b) -> ~c0 = c1 + b by normalization
+        //
+        if (isolate_term(lhs, rhs, result)) {
+            return BR_REWRITE2;
+        }
+
+        // match:  a :: b = c
+        // result: a[u:l] = c[u:l] AND (a::b)[l:0] = c[l:0]
+        // with: u: len(c)-1
+        //       l: len(c)-len(a)+1
+        // push eq down over concats
+        if (is_concat_target(lhs, rhs)) {
+            return mk_eq_concat(lhs, rhs, result);
+        }
+
+        if (st != BR_FAILED) {
             result = m().mk_eq(lhs, rhs);
-            return BR_REWRITE1;
+            return BR_DONE;
         }
     }
-    // Try to rewrite t1 + t2 = c --> t1 = c - t2
-    // Reason: it is much cheaper to bit-blast.
-    //
-    // also handles negated adds:
-    // c0 = ~(c1 + b) -> ~c0 = c1 + b by normalization
-    //
-    //  TODO conflict with sub_eq
-    // if (isolate_term(lhs, rhs, result)) {
-    //     return BR_REWRITE2;
-    // }
 
-    // match:  a :: b = c
-    // result: a[u:l] = c[u:l] AND (a::b)[l:0] = c[l:0]
-    // with: u: len(c)-1
-    //       l: len(c)-len(a)+1
-    // push eq down over concats
     if (is_concat_target(lhs, rhs)) {
         return mk_eq_concat(lhs, rhs, result);
     }
@@ -4415,58 +3975,6 @@ br_status bv_rewriter::mk_eq_core(expr * lhs, expr * rhs, expr_ref & result) {
       }
       result = m().mk_and(num_args, new_args.data());
       return BR_REWRITE2;
-    }
-
-    // sub_eq
-    // t = a - b -> t + b = a
-    if (m_util.is_bv_add(lhs) || m_util.is_bv_add(rhs)) {
-      bool is_move = false;
-      expr_ref_buffer lhs_args(m()), rhs_args(m());
-      if (!m_util.is_bv_add(lhs)) {
-        lhs_args.push_back(lhs);
-      }
-      if (!m_util.is_bv_add(rhs)) {
-        rhs_args.push_back(rhs);
-      }
-
-      if (m_util.is_bv_add(lhs)) {
-        unsigned int lhs_num = to_app(lhs)->get_num_args();
-        for (unsigned i = 0; i < lhs_num; ++i) {
-          expr *arg = to_app(lhs)->get_arg(i);
-          expr_ref neg(m());
-          if (is_bv_neg(arg, neg)) {
-            rhs_args.push_back(neg);
-            is_move = true;
-          }
-          else {
-            lhs_args.push_back(arg);
-          }
-        }
-      }
-
-      if (m_util.is_bv_add(rhs)) {
-        unsigned int rhs_num = to_app(rhs)->get_num_args();
-        for (unsigned i = 0; i < rhs_num; ++i) {
-          expr *arg = to_app(rhs)->get_arg(i);
-          expr_ref neg(m());
-          if (is_bv_neg(arg, neg)) {
-            lhs_args.push_back(neg);
-            is_move = true;
-          }
-          else {
-            rhs_args.push_back(arg);
-          }
-        }
-      }
-     
-      // don't conflict with c = t1 + t2 -> c - t1 = t2
-      if (is_move &&
-          !(lhs_args.size() == 1 && is_numeral(lhs_args[0])) &&
-          !(rhs_args.size() == 1 && is_numeral(rhs_args[0]))) {
-        result = m().mk_eq(mk_add_app(lhs_args.size(), lhs_args.data()),
-            mk_add_app(rhs_args.size(), rhs_args.data()));
-        return BR_REWRITE3;
-      }
     }
 
     // a or b = const (e.g. 0001111000) -> lhs1::lhs2::lhs3 = 000::1111::000
@@ -4639,7 +4147,7 @@ br_status bv_rewriter::mk_ite_core(expr * c, expr * t, expr * e, expr_ref & resu
             << mk_ismt2_pp(t, m()) << "\n:" << mk_ismt2_pp(e, m()) << "\n";);
     if (m().are_equal(t, e)) {
         result = e;
-        return BR_REWRITE1; // [Lin] should return BR_DONE?
+        return BR_REWRITE1;
     }
     if (m().is_not(c)) {
         result = m().mk_ite(to_app(c)->get_arg(0), e, t);
@@ -4690,385 +4198,6 @@ br_status bv_rewriter::mk_ite_core(expr * c, expr * t, expr * e, expr_ref & resu
         
         }
     }
-
-    // Bitwuzla
-    /* TODO
-     * match:  c ? a : b, where len(a) = 1
-     * result: (~c OR a) AND (c OR b)
-     */
-
-    /*
-     * match: c ? a : b, where c is a constant
-     * result: a if c is true, and b otherwise
-     */
-    if (m().is_true(c)) {
-      result = t;
-      return BR_DONE;
-    }
-    else if (m().is_false(c)){
-      result = e;
-      return BR_DONE;
-    }
-
-
-    /*
-     * match: c ? (c ? t2 : e1) : e
-     * result: c ? t2 : e
-     */
-    expr *c2, *t2, *e2;
-    if (m().is_ite(t, c2, t2, e2) && c2 == c) {
-      result = m().mk_ite(c, t2, e);
-      return BR_REWRITE1;
-    }
-    /*
-     * match: c ? (c2 ? e : e2) : e
-     * result: c AND ~c2 ? e2 : e
-     */
-    if (m().is_ite(t, c2, t2, e2) && t2 == e) {
-      result = m().mk_ite(m().mk_and(c, m().mk_not(c2)), e2, e);
-      return BR_REWRITE3;
-    }
-    /*
-     * match: c ? (c2 ? t2 : e) : e
-     * result: c AND c2 ? t2 : e
-     */
-    if (m().is_ite(t, c2, t2, e2) && e2 == e) {
-      result = m().mk_ite(m().mk_and(c, c2), t2, e);
-      return BR_REWRITE2;
-    }
-    /*
-     * match: c ? t : (c ? t2 : e2)
-     * result: c ? t : e2
-     */
-    if (m().is_ite(e, c2, t2, e2) && c == c2) {
-      result = m().mk_ite(c, t, e2);
-      return BR_REWRITE1;
-    }
-    /*
-     * match: c ? t : (c2 ? t : e2)
-     * result: ~c AND ~c2 ? e2 : t
-     */
-    if (m().is_ite(e, c2, t2, e2) && t == t2) {
-      result = m().mk_ite(m().mk_and(m().mk_not(c), m().mk_not(c2)), e2, t);
-      return BR_REWRITE3;
-    }
-    /*
-     * match: c ? t : (c2 ? t2 : t)
-     * result: ~c AND c2 ? t2 : t
-     */
-    if (m().is_ite(e, c2, t2, e2) && t == e2) {
-      result = m().mk_ite(m().mk_and(m().mk_not(c), c2), t2, t);
-      return BR_REWRITE3;
-    }
-    // TODO if (!is_func(c)) for rewriting below
-    /*
-     * match:  c ? (1 + a) : a
-     * result: a + 0::c
-     */
-    numeral val;
-    if (m_util.is_bv_add(t) && m_util.is_numeral(to_app(t)->get_arg(0), val) && val.is_one() &&
-        is_app(e) && to_app(e)->get_num_args() == to_app(t)->get_num_args() - 1 &&
-        is_the_same(to_app(e)->get_num_args(), to_app(t)->get_args() + 1, to_app(e)->get_args())) {
-      unsigned sz = get_bv_size(e);
-      result = m_util.mk_bv_add(e,
-          m().mk_ite(c, m_util.mk_numeral(1, sz), m_util.mk_numeral(0, sz)));
-      return BR_REWRITE2;
-    }
-    /*
-     * match:  c ? a : (1 + a)
-     * result: a + 0::c
-     */
-    if (m_util.is_bv_add(e) && m_util.is_numeral(to_app(e)->get_arg(0), val) && val.is_one() &&
-        is_app(t) && to_app(t)->get_num_args() == to_app(e)->get_num_args() - 1 &&
-        is_the_same(to_app(t)->get_num_args(), to_app(t)->get_args(), to_app(e)->get_args() + 1)) {
-      unsigned sz = get_bv_size(e);
-      result = m_util.mk_bv_add(t,
-          m().mk_ite(c, m_util.mk_numeral(0, sz), m_util.mk_numeral(1, sz)));
-      return BR_REWRITE2;
-    }
-    if (m_util.is_concat(t) && m_util.is_concat(e)) {
-      /*
-       * match:  c ? (a::b) : (a::d)
-       * result: a :: (c ? b : d)
-       */
-      if (to_app(t)->get_arg(0) == to_app(e)->get_arg(0)) {
-        expr *tt, *ee;
-        bool is_flat = false;
-        if (to_app(t)->get_num_args() == 2) {
-          tt = to_app(t)->get_arg(1);
-        }
-        else {
-          SASSERT(to_app(t)->get_num_args() > 2);
-          tt = m_util.mk_concat(to_app(t)->get_num_args() - 1, to_app(t)->get_args() + 1);
-          is_flat = true;
-        }
-
-        if (to_app(e)->get_num_args() == 2) {
-          ee = to_app(e)->get_arg(1);
-        }
-        else {
-          SASSERT(to_app(e)->get_num_args() > 2);
-          ee = m_util.mk_concat(to_app(e)->get_num_args() - 1, to_app(e)->get_args() + 1);
-          is_flat = true;
-        }
-
-        result = m_util.mk_concat(to_app(t)->get_arg(0),
-            m().mk_ite(c, tt, ee));
-        if (is_flat) {
-          return BR_REWRITE3;
-        } else {
-          return BR_REWRITE2;
-        }
-      }
-      /*
-       * match:  c ? (a::b) : (d::b)
-       * result: (c ? a : d) :: b
-       */
-      if (to_app(t)->get_arg(to_app(t)->get_num_args() - 1) ==
-          to_app(e)->get_arg(to_app(e)->get_num_args() - 1)) {
-        expr *tt, *ee;
-        bool is_flat = false;
-        if (to_app(t)->get_num_args() == 2) {
-          tt = to_app(t)->get_arg(0);
-        }
-        else {
-          SASSERT(to_app(t)->get_num_args() > 2);
-          tt = m_util.mk_concat(to_app(t)->get_num_args() - 1, to_app(t)->get_args());
-          is_flat = true;
-        }
-
-        if (to_app(e)->get_num_args() == 2) {
-          ee = to_app(e)->get_arg(0);
-        }
-        else {
-          SASSERT(to_app(e)->get_num_args() > 2);
-          ee = m_util.mk_concat(to_app(e)->get_num_args() - 1, to_app(e)->get_args());
-          is_flat = true;
-        }
-
-        result = m_util.mk_concat(m().mk_ite(c, tt, ee),
-            to_app(t)->get_arg(to_app(t)->get_num_args() - 1));
-        if (is_flat) {
-          return BR_REWRITE3;
-        } else {
-          return BR_REWRITE2;
-        }
-      }
-    }
-    // TODO: `2a' is `a + a'
-    /*
-     * match:  c ? a OP b : a OP d, where OP is either +, &, *, /, %
-     * result: a OP (c ? b : d)
-     * flat: +, *, or, xor
-     * 2-args: /, %
-     */
-    if (is_app(t) && is_app(e) &&
-        to_app(t)->get_family_id() == to_app(e)->get_family_id() &&
-        to_app(t)->get_decl_kind() == to_app(e)->get_decl_kind() &&
-        (m_util.is_bv_add(t) || m_util.is_bv_mul(t)
-         || m_util.is_bv_or(t) || m_util.is_bv_xor(t)
-         || m_util.is_bv_udiv(t) || m_util.is_bv_urem(t)
-         || m_util.is_bv_sdiv(t) || m_util.is_bv_srem(t)
-         || m_util.is_bv_udivi(t) || m_util.is_bv_uremi(t)
-         || m_util.is_bv_sdivi(t) || m_util.is_bv_sremi(t)) &&
-        to_app(t)->get_arg(0) == to_app(e)->get_arg(0)) {
-
-      expr_ref tt(m()), ee(m());
-      bool is_flat = false;
-      if (to_app(t)->get_num_args() == 2) {
-        tt = to_app(t)->get_arg(1);
-      }
-      else {
-        SASSERT(!m_util.is_bv_udiv(t) && !m_util.is_bv_urem(t) &&
-            !m_util.is_bv_sdiv(t) && !m_util.is_bv_srem(t) &&
-            !m_util.is_bv_udivi(t) && !m_util.is_bv_uremi(t) &&
-            !m_util.is_bv_sdivi(t) && !m_util.is_bv_sremi(t));
-        tt = m().mk_app(get_fid(), to_app(t)->get_decl_kind(), to_app(t)->get_num_args() - 1, to_app(t)->get_args() + 1);
-        is_flat = true;
-      }
-
-      if (to_app(e)->get_num_args() == 2) {
-        ee = to_app(e)->get_arg(1);
-      }
-      else {
-        SASSERT(!m_util.is_bv_udiv(e) && !m_util.is_bv_urem(e) &&
-            !m_util.is_bv_sdiv(e) && !m_util.is_bv_srem(e) &&
-            !m_util.is_bv_udivi(e) && !m_util.is_bv_uremi(e) &&
-            !m_util.is_bv_sdivi(e) && !m_util.is_bv_sremi(e));
-        ee = m().mk_app(get_fid(), to_app(e)->get_decl_kind(), to_app(e)->get_num_args() - 1, to_app(e)->get_args() + 1);
-        is_flat = true;
-      }
-
-      ptr_buffer<expr> args;
-      args.push_back(to_app(t)->get_arg(0));
-      args.push_back(m().mk_ite(c, tt, ee));
-      result = m().mk_app(get_fid(), to_app(t)->get_decl_kind(), args.size(), args.data());
-      if (is_flat) {
-        return BR_REWRITE3;
-      } else {
-        return BR_REWRITE2;
-      }
-    }
-    /*
-     * match:  c ? a OP b : d OP b, where OP is either +, &, *, /, %
-     * result: (c ? a : d) OP b
-     * TODO: comment out, done by below
-     */
-    if (is_app(t) && is_app(e) &&
-        to_app(t)->get_family_id() == to_app(e)->get_family_id() &&
-        to_app(t)->get_decl_kind() == to_app(e)->get_decl_kind() &&
-        (m_util.is_bv_add(t) || m_util.is_bv_mul(t)
-         || m_util.is_bv_or(t) || m_util.is_bv_xor(t)
-         || m_util.is_bv_udiv(t) || m_util.is_bv_urem(t)
-         || m_util.is_bv_sdiv(t) || m_util.is_bv_srem(t)
-         || m_util.is_bv_udivi(t) || m_util.is_bv_uremi(t)
-         || m_util.is_bv_sdivi(t) || m_util.is_bv_sremi(t)) &&
-        to_app(t)->get_arg(to_app(t)->get_num_args() - 1) == to_app(e)->get_arg(to_app(e)->get_num_args() - 1)) {
-
-      expr_ref tt(m()), ee(m());
-      bool is_flat = false;
-      if (to_app(t)->get_num_args() == 2) {
-        tt = to_app(t)->get_arg(0);
-      }
-      else {
-        SASSERT(!m_util.is_bv_udiv(t) && !m_util.is_bv_urem(t) &&
-            !m_util.is_bv_sdiv(t) && !m_util.is_bv_srem(t) &&
-            !m_util.is_bv_udivi(t) && !m_util.is_bv_uremi(t) &&
-            !m_util.is_bv_sdivi(t) && !m_util.is_bv_sremi(t));
-        tt = m().mk_app(get_fid(), to_app(t)->get_decl_kind(), to_app(t)->get_num_args() - 1, to_app(t)->get_args());
-        is_flat = true;
-      }
-
-      if (to_app(e)->get_num_args() == 2) {
-        ee = to_app(e)->get_arg(0);
-      }
-      else {
-        SASSERT(!m_util.is_bv_udiv(e) && !m_util.is_bv_urem(e) &&
-            !m_util.is_bv_sdiv(e) && !m_util.is_bv_srem(e) &&
-            !m_util.is_bv_udivi(e) && !m_util.is_bv_uremi(e) &&
-            !m_util.is_bv_sdivi(e) && !m_util.is_bv_sremi(e));
-        ee = m().mk_app(get_fid(), to_app(e)->get_decl_kind(), to_app(e)->get_num_args() - 1, to_app(e)->get_args());
-        is_flat = true;
-      }
-
-      ptr_buffer<expr> args;
-      args.push_back(m().mk_ite(c, tt, ee));
-      args.push_back(to_app(t)->get_arg(to_app(t)->get_num_args() - 1));
-      result = m().mk_app(get_fid(), to_app(t)->get_decl_kind(), args.size(), args.data());
-      if (is_flat) {
-        return BR_REWRITE3;
-      } else {
-        return BR_REWRITE2;
-      }
-    }
-    /*
-     * match:  c ? a OP b : d OP a, where OP is either +, &, *
-     * +, *, or, xor
-     * result: a OP (c ? b : d)
-     */
-    // struct out {};
-    // try {
-    //   if (is_app(t) && is_app(e) &&
-    //       to_app(t)->get_family_id() == to_app(e)->get_family_id() &&
-    //       to_app(t)->get_decl_kind() == to_app(e)->get_decl_kind() &&
-    //       (m_util.is_bv_add(t) || m_util.is_bv_mul(t)
-    //        || m_util.is_bv_or(t) || m_util.is_bv_xor(t))) {
-    //
-    //     expr_ref tt(m()), ee(m());
-    //     ptr_buffer<expr> e_args;
-    //     ptr_buffer<expr> common_args;
-    //     expr_fast_mark1 visited;
-    //     expr_fast_mark2 is_common;
-    //
-    //     buffer<unsigned> extra_counter;
-    //     m_expr2pos.reset(); // expensive case
-    //
-    //     unsigned num = to_app(t)->get_num_args();
-    //     for (unsigned i = 0; i < num; ++i) {
-    //       expr *a = to_app(t)->get_arg(i);
-    //       if (visited.is_marked(a)) { // appear multiple times
-    //         unsigned pos;
-    //         if (m_expr2pos.find(a, pos)) {
-    //           extra_counter[pos]++;
-    //         }
-    //         else {
-    //           m_expr2pos.insert(a, extra_counter.size());
-    //           extra_counter.push_back(1);
-    //         }
-    //       }
-    //       else {
-    //         visited.mark(a);
-    //       }
-    //     }
-    //     num = to_app(e)->get_num_args();
-    //     for (unsigned i = 0; i < num; ++i) {
-    //       expr *a = to_app(e)->get_arg(i);
-    //       unsigned pos;
-    //       if (visited.is_marked(a)) {
-    //         if (!is_common.is_marked(a)) {
-    //           is_common.mark(a);
-    //           common_args.push_back(a);
-    //         }
-    //         else if (m_expr2pos.find(a, pos) && extra_counter[pos] > 0) {
-    //           extra_counter[pos]--;
-    //           common_args.push_back(a);
-    //         }
-    //         else {
-    //          e_args.push_back(a);
-    //         }
-    //       }
-    //       else {
-    //         e_args.push_back(a);
-    //       }
-    //     }
-    //
-    //     if (common_args.size() != 0) {
-    //       ptr_buffer<expr> t_args;
-    //       num = to_app(t)->get_num_args();
-    //       for (unsigned i = 0; i < num; ++i) {
-    //         expr *a = to_app(t)->get_arg(i);
-    //         unsigned int pos;
-    //         if (!is_common.is_marked(a)) {
-    //           t_args.push_back(a);
-    //         }
-    //         else if (m_expr2pos.find(a, pos) && extra_counter[pos] > 0) {
-    //           extra_counter[pos]--;
-    //           t_args.push_back(a);
-    //         }
-    //       }
-    //
-    //       if (t_args.size() == 0 || e_args.size() == 0) {
-    //         SASSERT(common_args.size() > 1); // note size of t and e > 1
-    //         t_args.push_back(common_args.back());
-    //         e_args.push_back(common_args.back());
-    //         common_args.pop_back();
-    //       }
-    //
-    //       if (common_args.size() == 0) {
-    //         throw out();
-    //       }
-    //
-    //       if (e_args.size() == 1) {
-    //         ee = e_args[0];
-    //       } else {
-    //         SASSERT(e_args.size() > 1);
-    //         ee = m().mk_app(get_fid(), to_app(e)->get_decl_kind(), e_args.size(), e_args.data());
-    //       }
-    //
-    //       if (t_args.size() == 1) {
-    //         tt = t_args[0];
-    //       } else {
-    //         SASSERT(t_args.size() > 1);
-    //         tt = m().mk_app(get_fid(), to_app(t)->get_decl_kind(), t_args.size(), t_args.data());
-    //       }
-    //       common_args.push_back(m().mk_ite(c, tt, ee));
-    //       result = m().mk_app(get_fid(), to_app(t)->get_decl_kind(), common_args.size(), common_args.data());
-    //       return BR_REWRITE3;
-    //     }
-    //   }
-    // }
-    // catch (const out &) {}
-    // end of Bitwuzla
     
     return BR_FAILED;
 }

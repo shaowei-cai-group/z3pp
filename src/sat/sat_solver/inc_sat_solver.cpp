@@ -1104,7 +1104,5 @@ void inc_sat_display(std::ostream& out, solver& _s, unsigned sz, expr*const* sof
 
 tactic * mk_psat_tactic(ast_manager& m, params_ref const& p) {
     parallel_params pp(p);
-    params_ref sat_solver_pp;
-    sat_solver_pp.set_bool("ext_sat_solver", p.get_bool("ext_sat_solver", true));
-    return pp.enable() ? mk_parallel_tactic(mk_inc_sat_solver(m, p, false), p) : mk_sat_tactic(m, sat_solver_pp);
+    return pp.enable() ? mk_parallel_tactic(mk_inc_sat_solver(m, p, false), p) : mk_sat_tactic(m);
 }

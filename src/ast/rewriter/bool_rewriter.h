@@ -53,7 +53,6 @@ class bool_rewriter {
     bool           m_flat;
     bool           m_local_ctx;
     bool           m_elim_and;
-    bool           m_elim_or;
     bool           m_blast_distinct;
     unsigned       m_blast_distinct_threshold;
     bool           m_ite_extra_rules;
@@ -67,7 +66,6 @@ class bool_rewriter {
     br_status mk_nflat_or_core(unsigned num_args, expr * const * args, expr_ref & result);
 
     void mk_and_as_or(unsigned num_args, expr * const * args, expr_ref & result);
-    void mk_or_as_and(unsigned num_args, expr * const * args, expr_ref & result);
 
     expr * mk_or_app(unsigned num_args, expr * const * args);
     bool simp_nested_not_or(unsigned num_args, expr * const * args, expr_fast_mark1 & neg_lits, expr_fast_mark2 & pos_lits, expr_ref & result);
@@ -88,19 +86,7 @@ public:
     bool flat() const { return m_flat; }
     void set_flat(bool f) { m_flat = f; }
     bool elim_and() const { return m_elim_and; }
-    void set_elim_and(bool f) { 
-      m_elim_and = f;
-      if (f) {
-        m_elim_or = !f;
-      }
-    }
-    bool elim_or() const { return m_elim_or; }
-    void set_elim_or(bool f) {
-      m_elim_or = f;
-      if (f) {
-        m_elim_and = !f;
-      }
-    }
+    void set_elim_and(bool f) { m_elim_and = f; }
     void reset_local_ctx_cost() { m_local_ctx_cost = 0; }
     
     void updt_params(params_ref const & p);
@@ -122,7 +108,6 @@ public:
     br_status mk_iff_core(expr * lhs, expr * rhs, expr_ref & result) { return mk_eq_core(lhs, rhs, result); }
     br_status mk_and_core(unsigned num_args, expr * const * args, expr_ref & result) {
         if (m_elim_and) {
-          SASSERT(!m_elim_or);
             mk_and_as_or(num_args, args, result);
             return BR_DONE;
         }
@@ -134,16 +119,9 @@ public:
         }
     }
     br_status mk_or_core(unsigned num_args, expr * const * args, expr_ref & result) {
-        if (m_elim_or) {
-          SASSERT(!m_elim_and);
-            mk_or_as_and(num_args, args, result);
-            return BR_DONE;
-        }
-        else {
-          return m_flat ?
+        return m_flat ?
             mk_flat_or_core(num_args, args, result) :
             mk_nflat_or_core(num_args, args, result);
-        }
     }
     br_status mk_ite_core(expr * c, expr * t, expr * e, expr_ref & result);
     br_status mk_not_core(expr * t, expr_ref & result);
@@ -174,7 +152,6 @@ public:
     }
     void mk_or(unsigned num_args, expr * const * args, expr_ref & result) {
         if (mk_or_core(num_args, args, result) == BR_FAILED)
-            SASSERT(!m_elim_or);
             result = m().mk_or(num_args, args);
     }
     expr_ref mk_or(unsigned num_args, expr * const * args) {

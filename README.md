@@ -1,3 +1,16 @@
+# Z3++
+Z3++ is a derived SMT solver based on Z3, which participated in SMT-COMP 2022 and won the gold for Biggest Lead Model Validation and Largest Contribution Model Validation.
+
+For any solver built upon Z3++, we would appreciate that the solver includes "Z3++" in the name for credit.
+
+The homepage of Z3++ is http://z3-plus-plus.github.io/
+
+Reference can be found as follows:
+
+Shaowei Cai, Bohan Li, Jinkun Lin, Zhonghan Wang, Bohua Zhan, Xindi Zhang, Mengyu Zhao. "Z3++ at SMT-COMP 2022" https://github.com/z3-plus-plus/z3-plus-plus.github.io/blob/main/Z3++_at_SMT_COMP_2022.pdf
+
+Shaowei Cai, Bohan Li, Xindi Zhang. "[Local Search For SMT on Linear Integer Arithmetic.](https://link.springer.com/chapter/10.1007/978-3-031-13188-2_12)" In CAV 2022
+
 # Z3
 
 Z3 is a theorem prover from Microsoft Research. 
@@ -11,6 +24,9 @@ Z3 can be built using [Visual Studio][1], a [Makefile][2] or using [CMake][3]. I
 [bindings for several programming languages][4]. 
 
 See the [release notes](RELEASE_NOTES) for notes on various stable releases of Z3.
+
+
+
 
 ## Build status
 

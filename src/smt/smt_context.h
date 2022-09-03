@@ -50,8 +50,8 @@ Revision History:
 #include "model/model.h"
 #include "solver/progress_callback.h"
 #include "solver/assertions/asserted_formulas.h"
-#include "smt/nia_ls/nia_ls.h"
-#include "smt/lia_ls/lia_ls.h"
+#include "sls/nia_ls/nia_ls.h"
+#include "sls/lia_ls/lia_ls.h"
 #include <tuple>
 #include <vector>
 

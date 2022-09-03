@@ -58,8 +58,8 @@ def init_project_def():
     add_lib('subpaving_tactic', ['core_tactics', 'subpaving'], 'math/subpaving/tactic')
 
     add_lib('proto_model', ['model', 'rewriter', 'smt_params'], 'smt/proto_model')
-    add_lib('lia_ls', [], 'smt/lia_ls')
-    add_lib('nia_ls', [], 'smt/nia_ls')
+    add_lib('lia_ls', [], 'sls/lia_ls')
+    add_lib('nia_ls', [], 'sls/nia_ls')
     add_lib('smt', ['bit_blaster', 'macros', 'normal_forms', 'cmd_context', 'proto_model', 'solver_assertions', 'lia_ls', 'nia_ls' ,
                     'substitution', 'grobner', 'simplex', 'proofs', 'pattern', 'parser_util', 'fpa', 'lp'])
     add_lib('bv_tactics', ['tactic', 'bit_blaster', 'core_tactics'], 'tactic/bv')

@@ -20,8 +20,11 @@ struct Debug_Tracer {
 // #define _LINXI_DEBUG
 
 #ifdef _LINXI_DEBUG
-#define LINXI_DEBUG std::stringstream DEBUG_ss; DEBUG_ss << __FUNCTION__ << " " << __FILE__ << ":" << __LINE__; Debug_Tracer DEBUG_dt(DEBUG_ss.str());
-#define LINXI_HERE TRACE("linxi_simple_checker", tout << "here\n";);
+// #define LINXI_DEBUG std::stringstream DEBUG_ss; DEBUG_ss << __FUNCTION__ << " " << __FILE__ << ":" << __LINE__; Debug_Tracer DEBUG_dt(DEBUG_ss.str());
+// #define LINXI_HERE TRACE("linxi_simple_checker", tout << "here\n";);
+#define LINXI_DEBUG { }((void) 0 );
+#define LINXI_HERE { }((void) 0 );
+
 #else
 #define LINXI_DEBUG { }((void) 0 );
 #define LINXI_HERE { }((void) 0 );
@@ -1623,7 +1626,9 @@ else { // ( == 0) + (c > 0) -> > 0
                     display(tout, am, di);
                     tout << "\n";
                 );
-                merge_mul_domain(dom, di);
+                for (unsigned j = 0; j < deg; ++j) {
+                    merge_mul_domain(dom, di);
+                }
                 TRACE("linxi_simple_checker",
                     tout << "after merge mul: ";
                     display(tout, am, dom);

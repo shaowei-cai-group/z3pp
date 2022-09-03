@@ -768,7 +768,6 @@ br_status poly_rewriter<Config>::cancel_monomials(expr * lhs, expr * rhs, bool m
         }
     }
     
-    bool applied = num_coeffs > 1;
     buffer<numeral>  coeffs;
     m_expr2pos.reset();
     for (unsigned i = 0; i < lhs_sz; i++) {
@@ -781,7 +780,6 @@ br_status poly_rewriter<Config>::cancel_monomials(expr * lhs, expr * rhs, bool m
         unsigned pos;
         if (m_expr2pos.find(pp, pos)) {
             coeffs[pos] += a;
-            applied = true;
         }
         else {
             m_expr2pos.insert(pp, coeffs.size());
@@ -800,12 +798,8 @@ br_status poly_rewriter<Config>::cancel_monomials(expr * lhs, expr * rhs, bool m
         m_expr2pos.find(pp, pos);
         SASSERT(pos != UINT_MAX);
         coeffs[pos] -= a;
-        applied = true;
     }
 
-    if (!move && !applied) {
-      return BR_FAILED;
-    }
 
     ptr_buffer<expr> new_lhs_monomials;
     new_lhs_monomials.push_back(0); // save space for coefficient if needed

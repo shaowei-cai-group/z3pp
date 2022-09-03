@@ -44,7 +44,6 @@ namespace sat {
 
     solver::solver(params_ref const & p, reslimit& l):
         solver_core(l),
-        ext_solver(*this),
         m_checkpoint_enabled(true),
         m_config(p),
         m_par(nullptr),
@@ -73,7 +72,8 @@ namespace sat {
         m_trail_avg(),
         m_params(p),
         m_par_id(0),
-        m_par_syncing_clauses(false) {
+        m_par_syncing_clauses(false),
+        ext_solver(*this) {
         init_reason_unknown();
         updt_params(p);
         m_best_phase_size         = 0;
@@ -1313,7 +1313,6 @@ namespace sat {
 
         // try {
           // [Lin] Cadical
-        if (m_config.m_ext_sat_solver) {
           for (size_t i = 0; i < num_lits; ++i) {
             int l = lits[i].sign() ? -lits[i].var() : lits[i].var();
             ext_solver.assume(l);
@@ -1333,7 +1332,6 @@ namespace sat {
               SASSERT(sat_solver_res == 0);
               return l_undef;
           }
-        }
         // }
         // catch (const abort_solver &) {
         //   m_reason_unknown = "sat.giveup";

@@ -103,16 +103,8 @@ class sat_tactic : public tactic {
                         if (!is_uninterp_const(a))
                             continue;
                         TRACE("sat_tactic", tout << "extracting value of " << mk_ismt2_pp(n, m) << "\nvar: " << v << "\n";);
-                        lbool vval;
-                        if (m_params.get_bool("ext_sat_solver", true)) {
-                          vval = m_solver->sat_value_at(v);
-                        }
-                        else {
-                          vval = sat::value_at(v, m_solver->get_model());
-                        }
-                        // switch (m_solver->sat_value_at(v)) {
+                        switch (m_solver->sat_value_at(v)) {
                         // switch (sat::value_at(v, ll_m)) {
-                        switch(vval) {
                         case l_true: 
                             md->register_decl(a->get_decl(), m.mk_true()); 
                             break;

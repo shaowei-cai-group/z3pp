@@ -76,8 +76,7 @@ public:
         m_rewriter(m),
         m_util(m) {
         m_rewriter.set_flat(false);
-        m_rewriter.set_elim_and(false);
-        m_rewriter.set_elim_or(true);
+        m_rewriter.set_elim_and(true);
     }
 
     bv_util & butil() { return m_util; }

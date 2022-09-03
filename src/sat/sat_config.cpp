@@ -32,7 +32,6 @@ namespace sat {
     void config::updt_params(params_ref const & _p) {
         sat_params p(_p);
         m_max_memory  = megabytes_to_bytes(p.max_memory());
-        m_ext_sat_solver = p.ext_sat_solver();
 
         symbol s = p.restart();
         if (s == symbol("luby"))

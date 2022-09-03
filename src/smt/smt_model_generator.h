@@ -32,8 +32,8 @@ Revision History:
 #include "util/obj_hashtable.h"
 #include "util/map.h"
 #include "util/ref.h"
-#include "smt/lia_ls/lia_ls.h"
-#include "smt/nia_ls/nia_ls.h"
+#include "sls/lia_ls/lia_ls.h"
+#include "sls/nia_ls/nia_ls.h"
 
 class value_factory;
 class proto_model;

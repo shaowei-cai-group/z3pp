@@ -84,7 +84,6 @@ namespace sat {
     };
 
     struct config {
-        bool               m_ext_sat_solver;
         unsigned long long m_max_memory;
         phase_selection    m_phase;
         unsigned           m_search_sat_conflicts;
