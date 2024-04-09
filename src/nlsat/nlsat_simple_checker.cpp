@@ -22,12 +22,12 @@ struct Debug_Tracer {
 #ifdef _LINXI_DEBUG
 // #define LINXI_DEBUG std::stringstream DEBUG_ss; DEBUG_ss << __FUNCTION__ << " " << __FILE__ << ":" << __LINE__; Debug_Tracer DEBUG_dt(DEBUG_ss.str());
 // #define LINXI_HERE TRACE("linxi_simple_checker", tout << "here\n";);
-#define LINXI_DEBUG { }((void) 0 );
-#define LINXI_HERE { }((void) 0 );
+#define LINXI_DEBUG {} ((void) 0);
+#define LINXI_HERE {} ((void) 0);
 
 #else
-#define LINXI_DEBUG { }((void) 0 );
-#define LINXI_HERE { }((void) 0 );
+#define LINXI_DEBUG {} ((void) 0);
+#define LINXI_HERE {} ((void) 0);
 #endif
 
 
@@ -2014,16 +2014,16 @@ else { // ( == 0) + (c > 0) -> > 0
                 if (!check())
                     return false;
                 TRACE("linxi_simple_checker",
-                for (unsigned i = 0; i < arith_var_num; ++i) {
-                    tout << "====== arith[" << i << "] ======\n";
-                    tout << "original value: ";
-                    display(tout, am, vars_domain[i].ori_val);
-                    tout << "\nmagitude value: ";
-                    display(tout, am, vars_domain[i].mag_val);
-                    tout << "\n";
-                    tout << "====== arith[" << i << "] ======\n";
-                }
-            );
+                    for (unsigned i = 0; i < arith_var_num; ++i) {
+                        tout << "====== arith[" << i << "] ======\n";
+                        tout << "original value: ";
+                        display(tout, am, vars_domain[i].ori_val);
+                        tout << "\nmagitude value: ";
+                        display(tout, am, vars_domain[i].mag_val);
+                        tout << "\n";
+                        tout << "====== arith[" << i << "] ======\n";
+                    }
+                );
             }
             // LINXI_DEBUG;
             // // test_anum();

@@ -36,6 +36,7 @@ Revision History:
 #include "nlsat/nlsat_simple_checker.h"
 #include "nlsat/nlsat_variable_ordering_strategy.h"
 #include "nlsat/nlsat_symmetry_checker.h"
+#include "nlsat/nlsat_local_search.h"
 
 #define NLSAT_EXTRA_VERBOSE
 
@@ -128,6 +129,12 @@ namespace nlsat {
         var_vector             m_inv_perm;
         // m_perm:     internal -> external
         // m_inv_perm: external -> internal
+
+        // ^ pure bool var
+        unsigned               m_num_pure_bools;
+        bool_var_vector        m_pure_bool_vars;
+        bool_var_vector        m_pure_bool_convert;
+
         struct perm_display_var_proc : public display_var_proc {
             var_vector &             m_perm;
             display_var_proc         m_default_display_var;
@@ -174,6 +181,7 @@ namespace nlsat {
         };
 
         explain                m_explain;
+        ls_helper              m_lsh;
 
         bool_var               m_bk;       // current Boolean variable we are processing
         var                    m_xk;       // current arith variable we are processing
@@ -214,15 +222,16 @@ namespace nlsat {
         unsigned               m_lemma_count;
 
 //#linxi begin
+        bool m_general_local_search;
         bool m_linxi_simple_check;
         unsigned m_linxi_variable_ordering_strategy;
         bool m_linxi_symmetry_check;
         bool m_linxi_set_0_more;
 //#linxi end
 
-// wzh
-        bool m_wzh_sample;
-// hzw
+
+        bool m_cell_sample;
+
 
         // statistics
         unsigned               m_conflicts;
@@ -250,10 +259,11 @@ namespace nlsat {
             m_num_bool_vars(0),
             m_display_var(m_perm),
             m_display_assumption(nullptr),
-// wzh
+
             // m_explain(s, m_assignment, m_cache, m_atoms, m_var2eq, m_evaluator),
-            m_explain(s, m_assignment, m_cache, m_atoms, m_var2eq, m_evaluator, m_wzh_sample),
-// hzw
+            m_explain(s, m_assignment, m_cache, m_atoms, m_var2eq, m_evaluator, m_cell_sample),
+            m_lsh(s, m_am, m_pm, m_cache, m_ism, m_evaluator, m_assignment, m_bvalues, m_clauses, m_atoms, m_pure_bool_vars, m_pure_bool_convert, m_random_seed, m_sub_values),
+
             m_scope_lvl(0),
             m_lemma(s),
             m_lazy_clause(s),
@@ -291,15 +301,16 @@ namespace nlsat {
             m_check_lemmas   = p.check_lemmas();
 
 //#linxi begin
+            m_general_local_search = p.general_local_search();
             m_linxi_simple_check = p.linxi_simple_check();
             m_linxi_variable_ordering_strategy = p.linxi_variable_ordering_strategy();
             m_linxi_symmetry_check = p.linxi_symmetry_check();
             m_linxi_set_0_more = p.linxi_set_0_more();
 //#linxi end
     
-// wzh
-            m_wzh_sample = p.wzh_sample();
-// hzw
+
+            m_cell_sample = p.cell_sample();
+
             m_ism.set_seed(m_random_seed);
             m_explain.set_simplify_cores(m_simplify_cores);
             m_explain.set_minimize_cores(min_cores);
@@ -1356,11 +1367,6 @@ namespace nlsat {
             
             // unsigned chosen = 0;
             // interval_set_ref chosen_set(m_ism);
-            
-            // // wzh seed
-            // random_gen m_rand(1);
-            // // hzw
-
 
             for (unsigned idx = 0; idx < cls.size(); ++idx) {
                 literal l = cls[idx];
@@ -1410,12 +1416,6 @@ namespace nlsat {
                     first_undef = idx;
                     first_undef_set = curr_set;
                 }
-                // // wzh
-                // if(m_rand() % num_undef == 0){
-                //     chosen = idx;
-                //     chosen_set = curr_set;
-                // }
-                // // hzw
             }
             TRACE("nlsat_inf_set", tout << "num_undef: " << num_undef << "\n";);
             if (num_undef == 0) 
@@ -1426,10 +1426,10 @@ namespace nlsat {
                 assign(cls[first_undef], mk_clause_jst(&cls)); 
                 updt_infeasible(first_undef_set);
 
-                // wzh
+                
                 // assign(cls[chosen], mk_clause_jst(&cls));
                 // updt_infeasible(chosen_set);
-                // hzw
+                
             }
             else if ( satisfy_learned ||
                      !cls.is_learned() /* must always satisfy input clauses */ ||
@@ -1437,11 +1437,11 @@ namespace nlsat {
                 decide(cls[first_undef]);
                 updt_infeasible(first_undef_set);
 
-                // wzh
+                
                 // decide the chosen one
                 // decide(cls[chosen]);
                 // updt_infeasible(chosen_set);
-                // hzw
+                
             }
             else {
                 TRACE("nlsat_lazy", tout << "skipping clause, satisfy_learned: " << satisfy_learned << ", cls.is_learned(): " << cls.is_learned()
@@ -1535,74 +1535,6 @@ namespace nlsat {
             }
         }
 
-        // wzh interval
-        // void interval_sort(clause_vector & vec){
-        //     if(vec.empty()){
-        //         return;
-        //     }
-        //     if(!all_unit_clause(vec)){
-        //         return;
-        //     }
-        //     vector<interval_set_ref> set_vec;
-        //     for(clause * c: vec){
-        //         const clause & cur = *c;
-        //         literal l = cur[0];
-        //         bool_var b = l.var();
-        //         TRACE("wzh", tout << "[interval sort] bool var: " << b << std::endl;);
-        //         atom * a = m_atoms[b];
-        //         interval_set_ref curr_set(m_ism);
-        //         curr_set = m_evaluator.infeasible_intervals(a, l.sign(), c);
-        //         if(m_ism.size(curr_set) != 1){
-        //             return;
-        //         }
-        //        set_vec.push_back(curr_set);
-        //     }
-
-        //    vector<interval> interval_vec = m_ism.getIntervals(set_vec);
-           
-        //    TRACE("wzh", 
-        //         tout << "[interval sort] interval size:\n" << interval_vec.size() << std::endl;
-        //         for(const auto & ele: interval_vec){
-        //             m_ism.display_interval(tout, ele);
-        //             tout << std::endl;
-        //         }
-        //    );
-
-        //    TRACE("wzh",
-        //    std::cout << "[interval sort] before adjust: " << std::endl;
-        //    for (clause *c : vec)
-        //    {
-        //        display(std::cout, *c);
-        //        std::cout << std::endl;
-        //    }
-        //    );
-
-        //    m_ism.compareForCleanupSort(interval_vec, vec);
-           
-        // //    TRACE("wzh",
-        // //         tout << "[interval sort] idx array: \n";
-        // //         for(unsigned ele: idx){
-        // //             tout << ele << std::endl;
-        // //         }
-        // //         tout << "after compare sort:\n";
-        // //         for (const auto &ele : interval_vec)
-        // //         {
-        // //             m_ism.display_interval(tout, ele);
-        // //             tout << std::endl;
-        // //         }
-        // //    );
-
-
-        //     TRACE("wzh", 
-        //         std::cout << "[interval sort] after adjust: " << std::endl;
-        //         for (clause *c : vec)
-        //         {
-        //             display(std::cout, *c);
-        //             std::cout << std::endl;
-        //         }
-        //     );
-        // }
-
         bool all_unit_clause(clause_vector const & vec){
             for(clause * c: vec){
                 if(c->size() != 1){
@@ -1611,7 +1543,6 @@ namespace nlsat {
             }
             return true;
         }
-        // hzw interval
 
 
         /**
@@ -1655,8 +1586,6 @@ namespace nlsat {
                     if (m_xk == null_var)
                         conflict_clause = process_clauses(m_bwatches[m_bk]);
                     else {
-                        // // wzh
-                        // interval_sort(m_watches[m_xk]);
                         conflict_clause = process_clauses(m_watches[m_xk]);
                     }
                     if (conflict_clause == nullptr)
@@ -1730,6 +1659,142 @@ namespace nlsat {
                 }
             }
             return r;
+        }
+
+        bool is_polys_equal(poly_vector const & p1, poly_vector const & p2) const {
+            if(p1.size() != p2.size()){
+                return false;
+            }
+            for(unsigned i = 0; i < p1.size(); i++){
+                if(!m_pm.eq(p1[i], p2[i])){
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        void clear_unit_literal(literal unit_l) {
+            // std::cout << "Clearing literal " << unit_l << std::endl;
+            for (unsigned i = 0; i < m_clauses.size(); i++) {
+                clause & cls = *m_clauses[i];
+                literal * cls_data = (literal *) cls.data();
+                bool changed = false;
+                for (unsigned j = 0; j < cls.size(); j++) {
+                    literal l = cls[j];
+                    if (l.var() == unit_l.var() && l.sign() != unit_l.sign()) {
+                        for (unsigned k = j; k < cls.size()-1; k++) {
+                            cls_data[k] = cls_data[k+1];
+                        }
+                        cls.shrink(cls.size() - 1);
+                        changed = true;
+                        break;
+                    }
+                }
+                // if (changed) {
+                //     std::cout << "clause after "; display(std::cout, cls); std::cout << std::endl;
+                // }
+            }
+        }
+
+        vector<bool_var> true_vars;
+        vector<bool_var> false_vars;
+
+        void simplify_unit_clauses() {
+            bool changed = true;
+            true_vars.reset();
+            false_vars.reset();
+            while (changed) {
+                changed = false;
+                for (unsigned i = 0; i < m_clauses.size(); i++) {
+                    clause * cls = m_clauses[i];
+                    if (cls->size() == 1) {
+                        literal l = (*cls)[0];
+                        if (m_atoms[l.var()] == nullptr) {
+                            // Unit boolean
+                            changed = true;
+                            // std::cout << "unit "; m_solver.display(std::cout, *cls); std::cout << std::endl;
+                            // std::cout << l.var() << " " << l.sign() << std::endl;
+                            del_clause(cls, m_clauses);
+                            clear_unit_literal(l);
+                            if (l.sign()) {
+                                false_vars.push_back(l.var());
+                            } else {
+                                true_vars.push_back(l.var());
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // convert >=, <= to ==
+        // del_clause(c, m_clauses);
+        // !(235 skoC + 42 skoS > 0)
+        // !(235 skoC + 42 skoS < 0)
+        // ---------------------------
+        // 235 skoC + 42 skoS = 0
+        // TODO: delete corresponding literal var
+        void simplify_equational_clauses(){
+            LSTRACE(tout << "start of simplify clauses\n";
+                display_atoms(tout);
+            );
+            var_vector m_ge_clauses, m_le_clauses;
+            vector<poly_vector> m_ge_polys, m_le_polys;
+            for(unsigned i = 0; i < m_clauses.size(); i++){
+                clause const & cls = *m_clauses[i];
+                // unit clause
+                if(cls.size() == 1){
+                    literal l = cls[0];
+                    if(m_atoms[l.var()] != nullptr){
+                        atom * a = m_atoms[l.var()];
+                        SASSERT(a->is_ineq_atom());
+                        ineq_atom * aa = to_ineq_atom(a);
+                        // >=
+                        if(l.sign() && aa->m_kind == atom::LT){
+                            m_ge_clauses.push_back(i);
+                            poly_vector ps;
+                            for(unsigned j = 0; j < aa->size(); j++){
+                                ps.push_back(aa->p(j));;
+                            }
+                            m_ge_polys.push_back(ps);
+                        }
+                        // <=
+                        else if(l.sign() && aa->m_kind == atom::GT){
+                            m_le_clauses.push_back(i);
+                            poly_vector ps;
+                            for(unsigned j = 0; j < aa->size(); j++){
+                                ps.push_back(aa->p(j));
+                            }
+                            m_le_polys.push_back(ps);
+                        }
+                    }
+                }
+            }
+            vector<var_pair> m_eq_clauses;
+            for(unsigned i = 0; i < m_ge_polys.size(); i++){
+                for(unsigned j = 0; j < m_le_polys.size(); j++){
+                    if(is_polys_equal(m_ge_polys[i], m_le_polys[j])){
+                        // { >=, <= }
+                        m_eq_clauses.push_back(std::make_pair(m_ge_clauses[i], m_le_clauses[j]));
+                    }
+                }
+            }
+            clause_vector m_le_cls;
+            for(unsigned i = 0; i < m_eq_clauses.size(); i++){
+                m_le_cls.push_back(m_clauses[m_eq_clauses[i].second]);
+                // transfer !< to ==
+                clause & cls = *(m_clauses[m_eq_clauses[i].first]);
+                literal & l = cls[0];
+                l.neg();
+                m_atoms[l.var()]->m_kind = atom::EQ;
+            }
+            for(unsigned i = 0; i < m_le_cls.size(); i++){
+                del_clause(m_le_cls[i], m_clauses);
+            }
+            LSTRACE(tout << "end of simplify clauses\n";
+                display_atoms(tout);
+            );
         }
 
 //#linxi begin Simple Check
@@ -1861,6 +1926,72 @@ namespace nlsat {
                 if (!simplify()) 
                     return l_false;
             }
+
+            if (m_general_local_search) {
+                // Start local search
+                // std::cout << "start local search" << std::endl;
+                unsigned num = num_vars();
+                var_info_collector collector(m_pm, m_atoms, num);
+                collector.collect(m_clauses);
+                collector.collect(m_learned);
+
+                LSTRACE(
+                    std::cout << "enable local search simplify\n";
+                    tout << "before local search simplify\n";
+                    display_clauses(tout);
+                );
+                // std::cout << "### before simplify ###" << std::endl;
+                // display_clauses(std::cout);
+                simplify_unit_clauses();
+                simplify_equational_clauses();
+                if (!local_search_simplify()) {
+                    UNREACHABLE();
+                }
+                // std::cout << std::endl << "### after simplify ###" << std::endl << std::endl;;
+                // display_clauses(std::cout);
+                LSTRACE(
+                    tout << "after local search simplify\n";
+                    display_clauses(tout);
+                );
+
+                init_pure_bool();
+                TRACE("nlsat_ls", std::cout << "enable local search" << std::endl;);
+                m_lsh.set_var_num(num_vars());
+                auto res = m_lsh.local_search();
+                LSTRACE(std::cout << "local search exit\n";
+                    tout << "local search exit\n";
+                );
+                if (res == l_true) {
+                    for (bool_var b : true_vars) {
+                        m_bvalues[b] = l_true;
+                    }
+                    for (bool_var b : false_vars) {
+                        m_bvalues[b] = l_false;
+                    }
+                    TRACE("nlsat_ls", std::cout << "[ls] solved by local search\n";
+                        display_assignment(tout);
+                    );
+                    return l_true;
+                }
+                // ICP returns unsat
+                else if(res == l_false){
+                    return l_false;
+                }
+                else if(res == l_undef) {
+                    TRACE("nlsat_ls", 
+                        tout << "[ls] local search failed\n";
+                        std::cout << "[ls] local search failed\n";
+                    );
+                    // for nra local search, we return unknown if we failed
+                    // return l_undef;
+                    return l_undef;
+                }
+                else {
+                    UNREACHABLE();
+                }
+                // End local search   
+
+            }
             
             if (!can_reorder()) {
 
@@ -1901,6 +2032,24 @@ namespace nlsat {
                 m_bvalues[i] = l_undef;
             }
             m_assignment.reset();
+        }
+
+        void init_pure_bool() {
+            m_num_pure_bools = 0;
+            m_pure_bool_vars.reset();
+            for(bool_var b = 0; b < m_atoms.size(); b++){
+                if(m_atoms[b] == nullptr && !m_dead[b]){
+                    m_pure_bool_vars.push_back(b);
+                }
+            }
+            m_num_pure_bools = m_pure_bool_vars.size();
+            m_pure_bool_convert.reset();
+            if(m_num_pure_bools > 0) {
+                m_pure_bool_convert.resize(m_pure_bool_vars.back() + 1, null_var);
+            }
+            for(unsigned i = 0; i < m_pure_bool_vars.size(); i++) {
+                m_pure_bool_convert[m_pure_bool_vars[i]] = i;
+            }
         }
 
         lbool check(literal_vector& assumptions) {
@@ -2996,6 +3145,42 @@ namespace nlsat {
             return true;
         }
 
+        substitute_value_vector m_sub_values;
+
+        bool local_search_simplify() {
+            m_sub_values.reset();
+            polynomial_ref p(m_pm), q(m_pm);
+            var v;
+            init_var_signs();
+            SASSERT(m_learned.empty());
+            bool change = true;
+            while (change) {
+                change = false;
+                for (clause* c : m_clauses) {
+                    if (local_search_solve_var(*c, v, p, q)) {
+                        LSTRACE(tout << "loop clause in local search simplify\n";
+                            display(tout, *c); tout << std::endl;
+                        );
+                        q = -q;
+                        m_sub_values.push_back(substitute_value(v, p, q));
+                        // v = q / p
+                        TRACE("nlsat", tout << "p: " << p << "\nq: " << q << "\n x" << v << "\n";);
+                        m_patch_var.push_back(v);
+                        m_patch_num.push_back(q);
+                        m_patch_denom.push_back(p);
+                        // we do not delete simplify clauses in ls_simplify
+                        // del_clause(c, m_clauses);
+                        if (!substitute_var(v, p, q))
+                            return false;
+                        TRACE("nlsat", display(tout << "simplified\n"););
+                        change = true;
+                        break;
+                    }
+                }
+            }
+            return true;
+        }
+
         void fix_patch() {
             for (unsigned i = m_patch_var.size(); i-- > 0; ) {
                 var v = m_patch_var[i];
@@ -3221,6 +3406,54 @@ namespace nlsat {
                         return true;
                     default:
                         break;
+                    }
+                }
+            }
+            return false;
+        }        
+
+        bool local_search_solve_var(clause& c, var& v, polynomial_ref& p, polynomial_ref& q) {
+            poly* p0;
+            if (!is_unit_eq(c)) {
+                return false;
+            }
+            ineq_atom & a = *to_ineq_atom(m_atoms[c[0].var()]);
+            if (!is_single_poly(a, p0)) {
+                return false;
+            }
+            // var mx = max_var(p0);
+            // if (mx >= m_is_int.size()) return false;
+            var_vector vars;
+            m_pm.vars(p0, vars);
+            if (vars.size() > 3) {
+                return false;
+            }
+            for (var x : vars) {
+                if (m_is_int[x]) continue;
+                if (1 == m_pm.degree(p0, x)) {                    
+                    p = m_pm.coeff(p0, x, 1, q);
+                    if (!m_pm.is_const(p)) {
+                        continue;
+                    }
+                    if (m_pm.total_degree(q) > 1) {
+                        continue;
+                    }
+                    var_vector qvars;
+                    m_pm.vars(q, qvars);
+                    if (qvars.size() > 2) {
+                        continue;
+                    }
+                    switch (m_pm.sign(p, m_var_signs)) {
+                        case l_true:
+                            v = x;
+                            return true;
+                        case l_false:
+                            v = x;
+                            p = -p;
+                            q = -q;
+                            return true;
+                        default:
+                            continue;
                     }
                 }
             }
@@ -3602,6 +3835,10 @@ namespace nlsat {
 
         std::ostream& display(std::ostream & out, clause const & c) const {
             return display(out, c, m_display_var);
+        }
+
+        std::ostream & display_var(std::ostream & out, var v) const {
+            return m_display_var(out, v);
         }
 
         std::ostream& display_smt2(std::ostream & out, unsigned num, literal const * ls, display_var_proc const & proc) const {
@@ -4012,6 +4249,14 @@ namespace nlsat {
 
     std::ostream& solver::display(std::ostream & out, atom const& a) const {
         return m_imp->display(out, a, m_imp->m_display_var);
+    }
+
+    std::ostream& solver::display(std::ostream & out, clause const & c) const {
+        return m_imp->display(out, c);
+    }
+
+    std::ostream & solver::display_var(std::ostream & out, var v) const {
+        return m_imp->display_var(out, v);
     }
 
     display_var_proc const & solver::display_proc() const {

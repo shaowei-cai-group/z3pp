@@ -46,9 +46,9 @@ namespace nlsat {
         bool                    m_factor;
         bool                    m_signed_project;
 
-// wzh
-        bool m_wzh_sample;
-// hzw
+
+        bool m_cell_sample;
+
 
         struct todo_set {
             polynomial::cache  &    m_cache;
@@ -132,12 +132,12 @@ namespace nlsat {
         svector<char>           m_already_added_literal;
 
         evaluator &             m_evaluator;
-// wzh
+
         // imp(solver & s, assignment const & x2v, polynomial::cache & u, atom_vector const & atoms, atom_vector const & x2eq,
         //     evaluator & ev):
         imp(solver & s, assignment const & x2v, polynomial::cache & u, atom_vector const & atoms, atom_vector const & x2eq,
             evaluator & ev, bool is_sample):
-// hzw
+
             m_solver(s),
             m_assignment(x2v),
             m_atoms(atoms),
@@ -154,9 +154,9 @@ namespace nlsat {
             m_core1(s),
             m_core2(s),
             m_result(nullptr),
-// wzh
-            m_wzh_sample(is_sample),
-// hzw
+
+            m_cell_sample(is_sample),
+
             m_evaluator(ev) {
             m_simplify_cores   = false;
             m_full_dimensional = false;
@@ -609,7 +609,6 @@ namespace nlsat {
             }
         }
 
-        // wzh sample projection
         void add_sample_coeff(polynomial_ref_vector &ps, var x){
             polynomial_ref p(m_pm);
             polynomial_ref lc(m_pm);
@@ -643,17 +642,6 @@ namespace nlsat {
             
             SASSERT(samples.size() <= 2);
 
-            TRACE("wzh", std::cout << "[wzh checkpoint] Sample polys:\n";
-                for(const auto ele: samples){
-                    m_pm.display(std::cout, ele);
-                    std::cout << std::endl;
-                }
-            );
-
-            TRACE("wzh", 
-                std::cout << "[sample projection] Here we use sample-projection\n";
-            );
-
             for (unsigned i = 0; i < ps.size(); i++){
                 p = ps.get(i);
                 for (unsigned j = 0; j < samples.size(); j++){
@@ -664,7 +652,7 @@ namespace nlsat {
                 }
             }
         }
-        // hzw
+        
         
         /**
            \brief Add leading coefficients of the polynomials in ps.
@@ -1230,7 +1218,7 @@ namespace nlsat {
         void project_cdcac(polynomial_ref_vector & ps, var max_x) {
             // whz
             bool first = true;
-            // hzw
+            
 
             if (ps.empty())
                 return;
@@ -1241,9 +1229,8 @@ namespace nlsat {
             var x = m_todo.remove_max_polys(ps);
             // Remark: after vanishing coefficients are eliminated, ps may not contain max_x anymore
             
-            // wzh sample-poly
             polynomial_ref_vector samples(m_pm);
-            // hzw
+
             
             if (x < max_x){
                 cac_add_cell_lits(ps, x, samples);
@@ -1257,10 +1244,6 @@ namespace nlsat {
                 TRACE("nlsat_explain", tout << "project loop, processing var "; display_var(tout, x); tout << "\npolynomials\n";
                       display(tout, ps); tout << "\n";);
 
-                TRACE("wzh", std::cout << "[project] current x: " << std::endl;
-                      std::cout << "x" << x << std::endl;
-                      std::cout << std::endl;
-                );
 
                 /**
                  * Sample Projection
@@ -1269,23 +1252,21 @@ namespace nlsat {
                  * "Solving Satisfiability of Polynomial Formulas By Sample - Cell Projection"
                  * https://arxiv.org/abs/2003.00409 
                  */
-                // wzh mcCallum first
+
                 if (first) {
-                    TRACE("nlsat_explain", tout << "[wzh] First McCallum Projection\n";);
                     add_lc(ps, x);
                     psc_discriminant(ps, x);
                     psc_resultant(ps, x);
                     first = false;
                 }
-                // wzh sample-projection next
+
                 else {
-                    TRACE("nlsat_explain", tout << "[wzh] next Sample Projection\n";);
                     add_lc(ps, x);
                     // add_sample_coeff(ps, x);
                     psc_discriminant(ps, x);
                     psc_resultant_sample(ps, x, samples);
                 }
-                // hzw
+                
                 if (m_todo.empty())
                     break;
                 x = m_todo.remove_max_polys(ps);
@@ -1293,7 +1274,7 @@ namespace nlsat {
             }
         }
         void project(polynomial_ref_vector & ps, var max_x) {
-            if (m_wzh_sample) {
+            if (m_cell_sample) {
                 project_cdcac(ps, max_x);
             }
             else {
@@ -2115,7 +2096,7 @@ namespace nlsat {
         }
 
     };
-// wzh
+
     // explain::explain(solver & s, assignment const & x2v, polynomial::cache & u, 
     //                 atom_vector const& atoms, atom_vector const& x2eq, evaluator & ev) {
     explain::explain(solver & s, assignment const & x2v, polynomial::cache & u, 
@@ -2123,7 +2104,7 @@ namespace nlsat {
         // m_imp = alloc(imp, s, x2v, u, atoms, x2eq, ev);
         m_imp = alloc(imp, s, x2v, u, atoms, x2eq, ev, is_sample);
     }
-// hzw
+
     explain::~explain() {
         dealloc(m_imp);
     }

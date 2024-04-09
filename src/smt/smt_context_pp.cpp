@@ -24,7 +24,7 @@ Revision History:
 #ifndef SINGLE_THREAD
 #include <thread>
 #endif
-#define LS_DEBUG
+#define NLS_DEBUG
 
 namespace smt {
 
@@ -314,22 +314,26 @@ namespace smt {
         }
     }
 
-    void context::expr_bool_var_map(nia::ls_solver *solver){
-        std::string myString;
+    void context::print_clauses_vec(const std::vector<std::vector<int> >& vec){
+#ifdef LS_DEBUG
+        std::cout<<"0\n"<<vec.size()<<"\n";
+        for(auto cl:vec){
+            std::cout<<"(";
+            for(auto l:cl){std::cout<<" "<<l;}
+            std::cout<<" )\n";
+        }
+#endif
+    }
+
+    void context::build_core_clauses(){
         if (!m_b_internalized_stack.empty()) {
             uint64_t sz = m_b_internalized_stack.size();
-#ifdef NLS_DEBUG
-        std::cout<<sz<<"\n";
-#endif
-            solver->make_lits_space(sz);
             int new_var_num=0;
             int if_var_num=0;
             for (uint64_t i = 0; i < sz; i++) {
                 expr *  n  = m_b_internalized_stack.get(i);
                 bool_var v = get_bool_var_of_id(n->get_id());
                 literal l_curr=get_literal(n);
-                std::stringstream ss;
-                ss<<l_curr.var()<<" ";
                 if(to_app(n)->get_decl()->get_name()=="="&&m.is_bool(to_app(n)->get_arg(0))){
                     expr *eq_term_a=to_app(n)->get_arg(0);
                     expr *eq_term_b=to_app(n)->get_arg(1);
@@ -349,7 +353,98 @@ namespace smt {
                     clause_tmp.clear();
                     clause_tmp.push_back(A);clause_tmp.push_back(a);clause_tmp.push_back(b);//A or a or b
                     clauses_vec.push_back(clause_tmp);
-                    ss<< "equal_new_var"<<new_var_num++;
+                }
+                else if(to_app(n)->get_decl()->get_name()=="or"){
+                    std::vector<int> clause_tmp;
+                    clause_tmp.push_back(-l_curr.var());
+                    for (unsigned j = 0; j < to_app(n)->get_num_args(); j++) {
+                        expr *or_term=to_app(n)->get_arg(j);
+                        std::vector<int> clause_tmp_1;
+                        clause_tmp_1.push_back(l_curr.var());
+                        if(to_app(or_term)->get_decl()->get_name()=="not"){
+                            bool_var v1 = get_bool_var_of_id(to_app(or_term)->get_arg(0)->get_id());
+                            clause_tmp.push_back(-v1);
+                            clause_tmp_1.push_back(v1);
+                        }
+                        else{
+                            bool_var v1 = get_bool_var_of_id(or_term->get_id());
+                            clause_tmp.push_back(v1);
+                            clause_tmp_1.push_back(-v1);
+                        }
+                        clauses_vec.push_back(clause_tmp_1);
+                    }
+                    clauses_vec.push_back(clause_tmp);
+                }
+                else if(to_app(n)->get_decl()->get_name()=="if"){
+                    expr *if_term_a=to_app(n)->get_arg(0);
+                    expr *if_term_b=to_app(n)->get_arg(1);
+                    expr *if_term_c=to_app(n)->get_arg(2);
+                    bool_var A,a,b,c;
+                    if(to_app(if_term_a)->get_decl()->get_name()=="not"){a=-get_bool_var_of_id(to_app(if_term_a)->get_arg(0)->get_id());}else{a=get_bool_var_of_id(if_term_a->get_id());}
+                    if(to_app(if_term_b)->get_decl()->get_name()=="not"){b=-get_bool_var_of_id(to_app(if_term_b)->get_arg(0)->get_id());}else{b=get_bool_var_of_id(if_term_b->get_id());}
+                    if(to_app(if_term_c)->get_decl()->get_name()=="not"){c=-get_bool_var_of_id(to_app(if_term_c)->get_arg(0)->get_id());}else{c=get_bool_var_of_id(if_term_c->get_id());}
+                    A=l_curr.var();
+                    std::vector<int> clause_tmp;
+                    clause_tmp.push_back(-A);clause_tmp.push_back(-a);clause_tmp.push_back(b);//-A or -a or b
+                    clauses_vec.push_back(clause_tmp);
+                    clause_tmp.clear();
+                    clause_tmp.push_back(-A);clause_tmp.push_back(a);clause_tmp.push_back(c);//-A or a or c
+                    clauses_vec.push_back(clause_tmp);
+                    clause_tmp.clear();
+                    clause_tmp.push_back(A);clause_tmp.push_back(-a);clause_tmp.push_back(-b);//A or -a or -b
+                    clauses_vec.push_back(clause_tmp);
+                    clause_tmp.clear();
+                    clause_tmp.push_back(A);clause_tmp.push_back(a);clause_tmp.push_back(-c);//A or a or -c
+                    clauses_vec.push_back(clause_tmp);
+                    clause_tmp.clear();
+                    clause_tmp.push_back(A);clause_tmp.push_back(-b);clause_tmp.push_back(-c);//A or -b or -c
+                    clauses_vec.push_back(clause_tmp);
+                }
+            }
+            origin_lit_num=m_b_internalized_stack.size();
+            partial_LS_phase_vec.resize(origin_lit_num);
+            complete_LS_phase_vec.resize(origin_lit_num);
+            core_clauses=clauses_vec;
+            clauses_vec.clear();//copy the clauses into core_clauses
+        }
+    }
+
+    void context::expr_bool_var_map(nra::ls_solver *solver){
+        std::string myString;
+        if (!m_b_internalized_stack.empty()) {
+            uint64_t sz = m_b_internalized_stack.size();
+#ifdef LS_DEBUG
+        std::cout << sz << "\n";
+#endif
+            solver->make_lits_space(sz);
+            int new_var_num = 0;
+            int if_var_num = 0;
+            for (uint64_t i = 0; i < sz; i++) {
+                expr *  n  = m_b_internalized_stack.get(i);
+                bool_var v = get_bool_var_of_id(n->get_id());
+                literal l_curr=get_literal(n);
+                std::stringstream ss;
+                ss << l_curr.var() << " ";
+                if (to_app(n)->get_decl()->get_name()=="="&&m.is_bool(to_app(n)->get_arg(0))) {
+                    expr *eq_term_a=to_app(n)->get_arg(0);
+                    expr *eq_term_b=to_app(n)->get_arg(1);
+                    bool_var A,a,b,c;
+                    if(to_app(eq_term_a)->get_decl()->get_name()=="not"){a=-get_bool_var_of_id(to_app(eq_term_a)->get_arg(0)->get_id());}else{a=get_bool_var_of_id(eq_term_a->get_id());}
+                    if(to_app(eq_term_b)->get_decl()->get_name()=="not"){b=-get_bool_var_of_id(to_app(eq_term_b)->get_arg(0)->get_id());}else{b=get_bool_var_of_id(eq_term_b->get_id());}
+                    A=l_curr.var();
+                    std::vector<int> clause_tmp;
+                    clause_tmp.push_back(-A);clause_tmp.push_back(-a);clause_tmp.push_back(b);//-A or -a or b
+                    clauses_vec.push_back(clause_tmp);
+                    clause_tmp.clear();
+                    clause_tmp.push_back(-A);clause_tmp.push_back(a);clause_tmp.push_back(-b);//-A or a or -b
+                    clauses_vec.push_back(clause_tmp);
+                    clause_tmp.clear();
+                    clause_tmp.push_back(A);clause_tmp.push_back(-a);clause_tmp.push_back(-b);//A or -a or -b
+                    clauses_vec.push_back(clause_tmp);
+                    clause_tmp.clear();
+                    clause_tmp.push_back(A);clause_tmp.push_back(a);clause_tmp.push_back(b);//A or a or b
+                    clauses_vec.push_back(clause_tmp);
+                    ss << "equal_new_var" << new_var_num++;
                 }
                 else if(to_app(n)->get_decl()->get_name()=="or"){
                     std::vector<int> clause_tmp;
@@ -399,9 +494,40 @@ namespace smt {
                     clauses_vec.push_back(clause_tmp);
                     ss<<"if if_var"<<if_var_num++;
                 }
+                else {
+                    smt::display(ss, l_curr, m, m_bool_var2expr.data());
+                }   // Store expressions corresponding to the boolean variable inside string
+                myString = ss.str();
+#ifdef LS_DEBUG
+                std::cout << myString << "\n";
+#endif
+                solver->build_lits(myString);
+            }
+        }
+    }
+
+    void context::read_lits(nia::ls_solver *solver,bool use_all_lits){
+        std::string myString;
+        if (!m_b_internalized_stack.empty()) {
+            uint64_t sz =(use_all_lits)? m_b_internalized_stack.size(): origin_lit_num;
+#ifdef LS_DEBUG
+        std::cout<<sz<<"\n";
+#endif
+            solver->make_lits_space(sz);
+            int new_var_num=0;
+            int if_var_num=0;
+            for (uint64_t i = 0; i < sz; i++) {
+                expr *  n  = m_b_internalized_stack.get(i);
+                bool_var v = get_bool_var_of_id(n->get_id());
+                literal l_curr=get_literal(n);
+                std::stringstream ss;
+                ss<<l_curr.var()<<" ";
+                if(to_app(n)->get_decl()->get_name()=="="&&m.is_bool(to_app(n)->get_arg(0))){ss<< "equal_new_var"<<new_var_num++;}
+                else if(to_app(n)->get_decl()->get_name()=="or"){ss << "or new_var"<<new_var_num++;}
+                else if(to_app(n)->get_decl()->get_name()=="if"){ss<<"if if_var"<<if_var_num++;}
                 else{smt::display(ss,l_curr,m,m_bool_var2expr.data());}//将布尔变量对应的表达式存放在string中
                 myString=ss.str();
-#ifdef NLS_DEBUG
+#ifdef LS_DEBUG
                 std::cout<<myString<<"\n";
 #endif
                 solver->build_lits(myString);
@@ -413,7 +539,7 @@ namespace smt {
         std::string myString;
         if (!m_b_internalized_stack.empty()) {
             uint64_t sz = m_b_internalized_stack.size();
-#ifdef NLS_DEBUG
+#ifdef LS_DEBUG
         std::cout<<sz<<"\n";
 #endif
             solver->make_lits_space(sz);
@@ -496,7 +622,7 @@ namespace smt {
                 }
                 else{smt::display(ss,l_curr,m,m_bool_var2expr.data());}//将布尔变量对应的表达式存放在string中
                 myString=ss.str();
-#ifdef NLS_DEBUG
+#ifdef LS_DEBUG
                 std::cout<<myString<<"\n";
 #endif
                 solver->build_lits(myString);

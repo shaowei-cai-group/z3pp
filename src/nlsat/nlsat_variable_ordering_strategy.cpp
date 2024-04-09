@@ -23,11 +23,11 @@ namespace nlsat {
         /** Number of terms that contain this variable. */
         unsigned_vector m_num_terms;
 
-        // wzh
+        
         numeral_vector m_coeffs;
         unsigned_vector m_num_uni;
         unsigned_vector m_num_roots;
-        // hzw
+        
 
         imp(pmanager & _pm, atom_vector const & atoms, unsigned _num_vars, unsigned _vos_type):
             pm(_pm),
@@ -45,11 +45,11 @@ namespace nlsat {
                 m_sum_term_degree.resize(num_vars, 0);
                 m_num_terms.resize(num_vars, 0);
 
-                // wzh
+                
                 m_num_uni.resize(num_vars, 0);
                 m_coeffs.resize(num_vars, 0);
                 m_num_roots.resize(num_vars, 0);
-                // hzw
+                
             }
         }
 
@@ -88,14 +88,14 @@ namespace nlsat {
         void collect(poly * p) {
             var_vector vec_vars;
             pm.vars(p, vec_vars);
-            // wzh
+            
             if(m_vos_type == UNIVARIATE || m_vos_type == ROOT){
                 if(vec_vars.size() == 1){
                     m_num_uni[vec_vars[0]]++;
                     m_num_roots[vec_vars[0]] += pm.sturm(p, vec_vars[0]);
                 }
             }
-            // hzw
+            
             for (unsigned i = 0, sz = vec_vars.size(); i < sz; ++i) {
                 var x = vec_vars[i];
                 unsigned k = pm.degree(p, x);
@@ -103,7 +103,7 @@ namespace nlsat {
                 m_sum_poly_degree[x] += k;
                 if (k > m_max_degree[x])
                     m_max_degree[x] = k;
-                // wzh
+                
                 if(m_vos_type == FEATURE){
                     for(unsigned kl = 0; kl <= k; kl++){
                         scoped_numeral curr(pm.m());
@@ -115,12 +115,12 @@ namespace nlsat {
                         }
                     }
                 }
-                // hzw
+                
             }
-            // wzh
+            
             if(m_vos_type != ONLYPOLY && m_vos_type != UNIVARIATE && m_vos_type != ROOT){
             // if (m_vos_type != ONLYPOLY) {
-            // hzw
+            
                 for (unsigned i = 0, sz = pm.size(p); i < sz; ++i) {
                     collect(pm.get_monomial(p, i));
                 }
@@ -155,7 +155,7 @@ namespace nlsat {
                 collect(*(cs[i]));
         }
 
-        // wzh
+        
        struct univariate_reorder_lt {
             VOS_Var_Info_Collector::imp const *m_info;
             univariate_reorder_lt(VOS_Var_Info_Collector::imp const *info):m_info(info) {}
@@ -186,7 +186,7 @@ namespace nlsat {
                 return m_info->m_num_roots[x] == m_info->m_num_roots[y] ? x < y: m_info->m_num_roots[x] > m_info->m_num_roots[y];
             }
         };
-        // hzw
+        
         struct brown_reorder_lt {
             VOS_Var_Info_Collector::imp const *m_info;
             brown_reorder_lt(VOS_Var_Info_Collector::imp const *info):m_info(info) {}
@@ -254,7 +254,7 @@ namespace nlsat {
             else if (m_vos_type == ONLYPOLY) {
                 std::sort(new_order.begin(), new_order.end(), onlypoly_reorder_lt(this));
             }
-            // wzh
+            
             else if(m_vos_type == UNIVARIATE){
                 std::sort(new_order.begin(), new_order.end(), univariate_reorder_lt(this));
             }
@@ -264,7 +264,7 @@ namespace nlsat {
             else if(m_vos_type == ROOT){
                 std::sort(new_order.begin(), new_order.end(), root_reorder_lt(this));
             }
-            // hzw
+            
             else {
                 UNREACHABLE();
             }

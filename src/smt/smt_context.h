@@ -50,8 +50,9 @@ Revision History:
 #include "model/model.h"
 #include "solver/progress_callback.h"
 #include "solver/assertions/asserted_formulas.h"
-#include "sls/nia_ls/nia_ls.h"
-#include "sls/lia_ls/lia_ls.h"
+#include "smt/nia_ls/nia_ls.h"
+#include "smt/lia_ls/lia_ls.h"
+#include "smt/nra_ls/nra_ls.h"
 #include <tuple>
 #include <vector>
 
@@ -81,7 +82,7 @@ namespace smt {
     protected:
         // boolidl::bool_ls_solver *   m_bool_ls_solver;
         lia::ls_solver *            m_lia_ls_solver;
-        nia::ls_solver *            m_nia_ls_solver;
+        nra::ls_solver *            m_nra_ls_solver;
         ast_manager &               m;
         smt_params &                m_fparams;
         params_ref                  m_params;
@@ -172,6 +173,8 @@ namespace smt {
         u_map<bool_var>             m_expr2bool_var;
 #endif
         std::vector<std::vector<int> >            clauses_vec;//记录子句信息
+        std::vector<std::vector<int> >            core_clauses;//核心的保证正确性的clauses
+        int                         origin_lit_num;
         ptr_vector<expr>            m_bool_var2expr;         // bool_var -> expr
         signed_char_vector          m_assignment;  //!< mapping literal id -> assignment lbool
         vector<watch_list>          m_watches;     //!< per literal
@@ -1356,6 +1359,8 @@ namespace smt {
         ast_mark & get_pp_visited() const {  return const_cast<ast_mark&>(m_pp_visited); }
 
     public:
+        void print_clauses_vec(const std::vector<std::vector<int> >& vec);
+
         void display_enode_defs(std::ostream & out) const;
 
         void display_bool_var_defs(std::ostream & out) const;
@@ -1412,8 +1417,9 @@ namespace smt {
 
         void display_expr_bool_var_map(std::ostream & out) const;
 
-        void expr_bool_var_map(nia::ls_solver *solver);
+        void read_lits(nia::ls_solver *solver,bool use_all_lits=true);
         void expr_bool_var_map(lia::ls_solver *solver);
+        void expr_bool_var_map(nra::ls_solver *solver);
         void display_relevant_exprs(std::ostream & out) const;
 
         void display_theories(std::ostream & out) const;
@@ -1782,6 +1788,27 @@ namespace smt {
         func_decl * get_macro_interpretation(unsigned i, expr_ref & interp) const { return m_asserted_formulas.get_macro_interpretation(i, interp); }
         quantifier * get_macro_quantifier(func_decl * f) const { return m_asserted_formulas.get_macro_quantifier(f); }
         void insert_macro(func_decl * f, quantifier * m, proof * pr, expr_dependency * dep) { m_asserted_formulas.insert_macro(f, m, pr, dep); }
+
+        //for hybrid
+        bool is_NIA=false;
+        bool check_original_clauses(const std::vector<std::vector<int> >& vec);
+        bool check_conflict(const std::vector<std::vector<int> >& vec);
+        void get_all_assignments();
+        void build_core_clauses();
+        void extract_true_clause(const std::vector<std::vector<int> >& origin_vec, std::vector<std::vector<int> >& new_vec);
+        void extract_true_clause(std::vector<std::vector<int> >& new_vec);
+        void call_ls(const std::vector<std::vector<int> >& cl_vec, uint64_t ls_max_step,bool complete_ls,int &ls_best_found_cost,bool record_frequency=false);
+        void rephase();
+        void rephase_partial_ls();
+        void rephase_complete_ls();
+        void save_phase_complete(nia::ls_solver *solver);
+        void save_phase_partial();
+        std::vector<int> complete_LS_phase_vec;
+        std::vector<lbool> partial_LS_phase_vec;
+        void modify_activity_by_LS(nia::ls_solver *solver);
+        bool hybrid_timeout=false;
+        int hybrid_time_limit=0;
+        bool has_high_coff=false;
     };
 
     struct pp_lit {

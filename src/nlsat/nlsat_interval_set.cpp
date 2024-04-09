@@ -109,6 +109,7 @@ namespace nlsat {
     interval_set_manager::interval_set_manager(anum_manager & m, small_object_allocator & a):
         m_am(m),
         m_allocator(a) {
+        set_const_anum();
     }
      
     interval_set_manager::~interval_set_manager() {
@@ -520,6 +521,258 @@ namespace nlsat {
         return new_set;
     }
 
+    interval_set * interval_set_manager::mk_full(){
+        anum zero;
+        return mk(true, true, zero, true, true, zero, null_literal, nullptr);
+    }
+
+    interval_set * interval_set_manager::mk_point_interval(anum const & w){
+        return mk(false, false, w, false, false, w, null_literal, nullptr);
+    }
+
+    interval_set * interval_set_manager::mk_complement(anum const & w){
+        interval_buffer result;
+        // (-oo, w)
+        anum zero;
+        interval inter1;
+        inter1.m_lower = zero;
+        m_am.set(inter1.m_upper, w);
+        inter1.m_lower_inf = true;
+        inter1.m_upper_inf = false;
+        inter1.m_lower_open = true;
+        inter1.m_upper_open = true;
+        push_back(m_am, result, inter1);
+
+        // (w, +oo)
+        interval inter2;
+        m_am.set(inter2.m_lower, w);
+        inter2.m_upper = zero;
+        inter2.m_lower_inf = false;
+        inter2.m_upper_inf = true;
+        inter2.m_lower_open = true;
+        inter2.m_upper_open = true;
+        push_back(m_am, result, inter2);
+
+        return mk_interval(m_allocator, result, false);
+    }
+
+    interval_set * interval_set_manager::mk_complement(interval_set const * s){
+        if(s == nullptr){
+            return mk_full();
+        }
+        if(s->m_full){
+            return nullptr;
+        }
+        anum zero;
+        unsigned num = num_intervals(s);
+        interval_buffer result;
+        // (-oo, x
+        if(!s->m_intervals[0].m_lower_inf){
+            interval inter;
+            inter.m_lower = zero;
+            inter.m_upper = s->m_intervals[0].m_lower;
+            inter.m_lower_inf = true;
+            inter.m_upper_inf = false;
+            inter.m_lower_open = true;
+            inter.m_upper_open = !s->m_intervals[0].m_lower_open;
+            push_back(m_am, result, inter);
+        }
+        // middle area
+        for(unsigned i = 1; i < num; i++){
+            interval curr_inter = s->m_intervals[i];
+            interval inter;
+            inter.m_lower = s->m_intervals[i - 1].m_upper;
+            inter.m_upper = curr_inter.m_lower;
+            inter.m_lower_inf = false;
+            inter.m_upper_inf = false;
+            inter.m_lower_open = !s->m_intervals[i - 1].m_upper_open;
+            inter.m_upper_open = !curr_inter.m_lower_open;
+            push_back(m_am, result, inter);
+        }
+        // x, +oo)
+        if(!s->m_intervals[num - 1].m_upper_inf){
+            interval inter;
+            inter.m_lower = s->m_intervals[num - 1].m_upper;
+            inter.m_upper = zero;
+            inter.m_lower_inf = false;
+            inter.m_upper_inf = true;
+            inter.m_lower_open = !s->m_intervals[num - 1].m_upper_open;
+            inter.m_upper_open = true;
+            push_back(m_am, result, inter);
+        }
+        // bool found_slack  = !result[0].m_lower_inf || !result[num-1].m_upper_inf;
+        return mk_interval(m_allocator, result, false);
+    }
+
+    // s1 /\ s2 = !(!s1 \/ !s2)
+    interval_set * interval_set_manager::mk_intersection(interval_set const * s1, interval_set const * s2){
+        if(s1 == nullptr || s2 == nullptr){
+            return nullptr;
+        }
+        return mk_complement(mk_union(mk_complement(s1), mk_complement(s2)));
+    }
+
+    bool interval_set_manager::contains_value(anum_vector const & vec, anum const & w){
+        for(auto ele: vec){
+            if(m_am.eq(ele, w)){
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void interval_set_manager::peek_in_complement_heuristic(interval_set const * s, anum_vector & vec){
+        TRACE("nlsat_ls", tout << "show set of insertion:\n";
+            display(tout, s);
+        );
+        SASSERT(!is_full(s));
+        vec.reset();
+        // z3 default
+        anum w1;
+        peek_in_complement(s, false, w1, true);
+        vec.push_back(w1);
+
+        // threshold value
+        anum_vector threshold_value;
+        peek_in_complement_threshold(s, threshold_value);
+        for(auto ele: threshold_value){
+            if (!contains_value(vec, ele)) {
+                vec.push_back(ele);
+            }
+        }
+
+        TRACE("nlsat_ls", tout << "show insertion sample values:\n";
+            for(auto ele: vec) {
+                m_am.display(tout, ele); tout << " ";
+            }
+            tout << std::endl;
+        );
+    }
+
+    bool interval_set_manager::is_rational(anum const & val) {
+        return m_am.degree(val) <= 1;
+    }
+
+    void interval_set_manager::peek_in_complement_threshold(interval_set const * s, anum_vector & vec){
+        // TRACE("nlsat_ls", tout << "show set for threshold\n";
+        //     display(tout, s); tout << std::endl;
+        // );
+        vec.reset();
+        if(s == nullptr || s->m_num_intervals == 0){
+            return;
+        }
+        // first interval's lower threshold
+        if(!s->m_intervals[0].m_lower_inf){
+            anum lower_w, w1;
+            // (
+            if(s->m_intervals[0].m_lower_open){
+                if (is_rational(s->m_intervals[0].m_lower)) {
+                    m_am.set(lower_w, s->m_intervals[0].m_lower);
+                    vec.push_back(lower_w);
+                } else {
+                    m_am.sub(s->m_intervals[0].m_lower, m_min, w1);
+                    m_am.select(w1, s->m_intervals[0].m_lower, lower_w);
+                    vec.push_back(lower_w);
+                }
+            }
+            // [
+            else {
+                m_am.sub(s->m_intervals[0].m_lower, m_min, w1);
+                m_am.select(w1, s->m_intervals[0].m_lower, lower_w);
+                vec.push_back(lower_w);
+            }
+        }
+        // last interval's upper threshold
+        if(!s->m_intervals[s->m_num_intervals-1].m_upper_inf){
+            anum upper_w, w1;
+            // )
+            if(s->m_intervals[s->m_num_intervals-1].m_upper_open){
+                if (is_rational(s->m_intervals[s->m_num_intervals-1].m_upper)) {
+                    m_am.set(upper_w, s->m_intervals[s->m_num_intervals-1].m_upper);
+                    vec.push_back(upper_w);
+                } else {
+                    m_am.add(s->m_intervals[s->m_num_intervals-1].m_upper, m_min, w1);
+                    m_am.select(s->m_intervals[s->m_num_intervals-1].m_upper, w1, upper_w);
+                    vec.push_back(upper_w);
+                }
+            }
+            // ]
+            else {
+                m_am.add(s->m_intervals[s->m_num_intervals-1].m_upper, m_min, w1);
+                m_am.select(s->m_intervals[s->m_num_intervals-1].m_upper, w1, upper_w);
+                vec.push_back(upper_w);
+            }
+        }
+        // middle interval's threshold
+        for(unsigned i = 0; i < s->m_num_intervals - 1; i++){
+            interval lower = s->m_intervals[i], upper = s->m_intervals[i + 1];
+            int com = m_am.compare(lower.m_upper, upper.m_lower);
+            if (com == 0){
+                if(lower.m_upper_open && upper.m_lower_open) {
+                    anum w;
+                    m_am.set(w, lower.m_upper);
+                    vec.push_back(w);
+                }
+            }
+            else {
+                SASSERT(com < 0);
+                anum w2, w3;
+                // )
+                if(lower.m_upper_open){
+                    if (is_rational(lower.m_upper)) {
+                        m_am.set(w2, lower.m_upper);
+                        vec.push_back(w2);
+                    } else {
+                        m_am.add(lower.m_upper, m_min, w3);
+                        m_am.select(lower.m_upper, w3, w2);
+                        if (m_am.lt(w2, upper.m_lower)) {
+                            vec.push_back(w2);
+                        }
+                    }
+                }
+                else {
+                    // w1 = lower_upper + min
+                    m_am.add(lower.m_upper, m_min, w3);
+                    m_am.select(lower.m_upper, w3, w2);
+                    if(m_am.lt(w2, upper.m_lower)){
+                        vec.push_back(w2);
+                    }
+                }
+                anum w4, w5;
+                // (
+                if(upper.m_lower_open){
+                    if (is_rational(upper.m_lower)) {
+                        m_am.set(w4, upper.m_lower);
+                        vec.push_back(w4);
+                    } else {
+                        m_am.sub(upper.m_lower, m_min, w5);
+                        m_am.select(w5, upper.m_lower, w4);
+                        if (m_am.gt(w4, lower.m_upper)) {
+                            vec.push_back(w4);
+                        }
+                    }
+                }
+                else {
+                    m_am.sub(upper.m_lower, m_min, w5);
+                    m_am.select(w5, upper.m_lower, w4);
+                    if(m_am.gt(w4, lower.m_upper)){
+                        vec.push_back(w4);
+                    }
+                }
+            }
+        }
+    }
+
+    void interval_set_manager::set_const_anum(){
+        m_am.set(m_zero, 0);
+        m_am.set(m_one, 1);
+        m_am.set(m_max, INT_MAX);
+        m_am.set(m_neg_max, INT_MIN);
+        // m_min = 0.0001
+        m_am.set(m_10k, 10000);
+        m_am.div(m_one, m_10k, m_min);
+    }
+
     bool interval_set_manager::is_full(interval_set const * s) {
         if (s == nullptr)
             return false;
@@ -702,7 +955,77 @@ namespace nlsat {
     }
 //#linxi end set0more
 //#linxi begin set0more
-    // void interval_set_manager::peek_in_complement(interval_set const * s, bool is_int, anum & w, bool randomize) {
+    void interval_set_manager::peek_in_complement(interval_set const * s, bool is_int, anum & w, bool randomize) {
+        SASSERT(!is_full(s));
+        if (s == nullptr) {
+            if (randomize) {
+                int num = m_rand() % 2 == 0 ? 1 : -1;
+#define MAX_RANDOM_DEN_K 4
+                int den_k = (m_rand() % MAX_RANDOM_DEN_K);
+                int den   = is_int ? 1 : (1 << den_k);
+                scoped_mpq _w(m_am.qm());
+                m_am.qm().set(_w, num, den);
+                m_am.set(w, _w);
+                return;
+            }
+            else {
+                m_am.set(w, 0);
+                return;
+            }
+        }
+        
+        unsigned n = 0;
+        
+        unsigned num = num_intervals(s);
+        if (!s->m_intervals[0].m_lower_inf) {
+            // lower is not -oo
+            n++;
+            m_am.int_lt(s->m_intervals[0].m_lower, w);
+            if (!randomize)
+                return;
+        }
+        if (!s->m_intervals[num-1].m_upper_inf) {
+            // upper is not oo
+            n++;
+            if (n == 1 || m_rand()%n == 0)
+                m_am.int_gt(s->m_intervals[num-1].m_upper, w);
+            if (!randomize)
+                return;
+        }
+        
+        // Try to find a gap that is not an unit.
+        for (unsigned i = 1; i < num; i++) {
+            if (m_am.lt(s->m_intervals[i-1].m_upper, s->m_intervals[i].m_lower)) {
+                n++;
+                if (n == 1 || m_rand()%n == 0)
+                    m_am.select(s->m_intervals[i-1].m_upper, s->m_intervals[i].m_lower, w);
+                if (!randomize)
+                    return;
+            }
+        }
+        
+        if (n > 0)
+            return;
+        
+        // Try to find a rational
+        unsigned irrational_i = UINT_MAX;
+        for (unsigned i = 1; i < num; i++) {
+            if (s->m_intervals[i-1].m_upper_open && s->m_intervals[i].m_lower_open) {
+                SASSERT(m_am.eq(s->m_intervals[i-1].m_upper, s->m_intervals[i].m_lower)); // otherwise we would have found it in the previous step
+                if (m_am.is_rational(s->m_intervals[i-1].m_upper)) {
+                    m_am.set(w, s->m_intervals[i-1].m_upper);
+                    return;
+                }
+                if (irrational_i == UINT_MAX)
+                    irrational_i = i-1;
+            }
+        }
+        SASSERT(irrational_i != UINT_MAX);
+        // Last option: peek irrational witness :-(
+        SASSERT(s->m_intervals[irrational_i].m_upper_open && s->m_intervals[irrational_i+1].m_lower_open);
+        m_am.set(w, s->m_intervals[irrational_i].m_upper);
+    }
+
     void interval_set_manager::peek_in_complement(interval_set const * s, bool is_int, anum & w, bool randomize, bool linxi_set_0_more) {
 //#linxi end set0more
         SASSERT(!is_full(s));
@@ -821,4 +1144,59 @@ namespace nlsat {
         return out;
     }
 
+    void interval_set_manager::push_boundary(vector<anum_boundary> & boundaries, anum const & val, bool is_open, int inc_score, unsigned c_idx) {
+        for (auto it = boundaries.begin(); it != boundaries.end(); it++) {
+            if (it->is_open == is_open && m_am.eq(it->value, val)) {
+                it->score += inc_score;
+                it->m_clauses.push_back(c_idx);
+                return;
+            }
+        }
+        boundaries.push_back(anum_boundary(val, is_open, inc_score, c_idx));
+    }
+
+    void interval_set_manager::add_boundaries(interval_set const * s, vector<anum_boundary> & boundaries, int & start_score, int weight, unsigned c_idx) {
+        for (unsigned j = 0; j < s->m_num_intervals; j++) {
+            if (s->m_intervals[j].m_lower_inf) {
+                // -oo is infeasible
+                start_score -= weight;
+            } else if (s->m_intervals[j].m_lower_open) {
+                // (x, ...), change at x]
+                push_boundary(boundaries, s->m_intervals[j].m_lower, true, -weight, c_idx);
+            } else {
+                // [x, ...), change at x)
+                push_boundary(boundaries, s->m_intervals[j].m_lower, false, -weight, c_idx);
+            }
+
+            if (s->m_intervals[j].m_upper_inf) {
+                // oo is infeasible
+            } else if (s->m_intervals[j].m_upper_open) {
+                // (..., x), change at x)
+                push_boundary(boundaries, s->m_intervals[j].m_upper, false, weight, c_idx);
+            } else {
+                // (..., x], change at x]
+                push_boundary(boundaries, s->m_intervals[j].m_upper, true, weight, c_idx);
+            }
+        }
+    }
+
+    bool interval_set_manager::contain_both_infinities(interval_set const * s) {
+        return s->m_intervals[0].m_lower_inf && s->m_intervals[s->m_num_intervals-1].m_upper_inf;
+    }
+
+    bool interval_set_manager::has_infeasible_boundary(interval_set const * s, anum const & val) {
+        // Determine whether the interval set has a boundary equal to val, and where val
+        // is not within the set
+        for (unsigned j = 0; j < s->m_num_intervals; j++) {
+            if (!s->m_intervals[j].m_lower_inf && s->m_intervals[j].m_lower_open &&
+                    m_am.eq(s->m_intervals[j].m_lower, val)) {
+                return true;
+            }
+            if (!s->m_intervals[j].m_upper_inf && s->m_intervals[j].m_upper_open &&
+                    m_am.eq(s->m_intervals[j].m_upper, val)) {
+                return true;
+            }
+        }
+        return false;
+    }
 };

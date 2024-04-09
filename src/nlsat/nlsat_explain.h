@@ -35,10 +35,10 @@ namespace nlsat {
     public:
         // explain(solver & s, assignment const & x2v, polynomial::cache & u, 
         //         atom_vector const& atoms, atom_vector const& x2eq, evaluator & ev);
-// wzh
+
         explain(solver & s, assignment const & x2v, polynomial::cache & u, 
                 atom_vector const& atoms, atom_vector const& x2eq, evaluator & ev, bool is_sample);
-// hzw
+
         ~explain();
 
         void reset();

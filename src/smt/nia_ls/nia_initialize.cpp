@@ -8,16 +8,20 @@ _swt_threshold(50),
 smooth_probability(3),
 _cutoff(1200),
 _additional_len(10),
-_max_step(UINT64_MAX)
+_max_step(UINT64_MAX),
+_complete_ls(false),
+_record_frequency(false)
 {mt.seed(1);}
 
-ls_solver::ls_solver(int random_seed)
+ls_solver::ls_solver(int random_seed,uint64_t max_step,bool complete_ls,bool record_frequency)
 :_swt_p(0.3),
 _swt_threshold(50),
 smooth_probability(3),
 _cutoff(1200),
 _additional_len(10),
-_max_step(UINT64_MAX)
+_max_step(max_step),
+_complete_ls(complete_ls),
+_record_frequency(record_frequency)
 {mt.seed(random_seed);}
 
 
@@ -76,7 +80,8 @@ void ls_solver::initialize_term_datas(){
     for(term &t:_terms){
         t.value=1;
         for(var_exp &ve:t.var_epxs){
-            t.value*=_solution[ve.var_index];
+            if(ve.exponent==1){t.value*=_solution[ve.var_index];}
+            else{t.value*=std::pow((long long)_solution[ve.var_index],ve.exponent);}
             if(t.value==0)break;
         }
     }

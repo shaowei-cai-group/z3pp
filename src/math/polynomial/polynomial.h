@@ -1030,7 +1030,6 @@ namespace polynomial {
             return out;
         }
 
-        // wzh polynomial
         // return number of real roots in R
         unsigned sturm(polynomial const * p, var x);
 
@@ -1039,7 +1038,6 @@ namespace polynomial {
         int sign_upper_inf(polynomial const *, var);
 
         void sturm_sequence(polynomial const * p, var x, ptr_vector<polynomial> &);
-        // hzw polynomial
     };
 
     typedef manager::factors factors;

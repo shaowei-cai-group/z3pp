@@ -1,4 +1,4 @@
-#include "sls/lia_ls/lia_ls.h"
+#include "smt/lia_ls/lia_ls.h"
 #include <sstream>
 namespace lia{
 //input transformation

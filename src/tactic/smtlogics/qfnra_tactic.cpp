@@ -34,6 +34,22 @@ static tactic * mk_qfnra_sat_solver(ast_manager& m, params_ref const& p, unsigne
                     mk_fail_if_undecided_tactic());
 }
 
+// local search tactic
+tactic * mk_general_ls_tactic(ast_manager & m, params_ref const & p) {
+    params_ref p_gls = p;
+    p_gls.set_bool("local_search_simplify", true);
+    return and_then(
+            mk_simplify_tactic(m, p),
+            mk_propagate_values_tactic(m, p),
+            mk_qfnra_local_search_tactic(m, p_gls));
+}
+
+tactic * mk_multilinear_ls_tactic(ast_manager & m, params_ref const & p) {
+    params_ref p_mls = p;
+    p_mls.set_bool("use_ls", true);
+    return using_params(mk_smt_tactic(m), p_mls);
+}
+
 tactic * linxi_mk_qfnra_very_small_solver(ast_manager& m, params_ref const& p) {
     ptr_vector<tactic> ts;
     {
@@ -107,7 +123,6 @@ tactic * linxi_mk_qfnra_small_solver(ast_manager& m, params_ref const& p) {
         // p_heuristic.set_uint("seed", 233);
         ts.push_back(try_for(mk_qfnra_nlsat_tactic(m, p_heuristic), 5 * 1000));
 
-        // // wzh
         params_ref p_order_4 = p;
         p_order_4.set_uint("linxi_variable_ordering_strategy", 4);
         ts.push_back(try_for(mk_qfnra_nlsat_tactic(m, p_order_4), 5 * 1000));
@@ -115,23 +130,21 @@ tactic * linxi_mk_qfnra_small_solver(ast_manager& m, params_ref const& p) {
         params_ref p_order_6 = p;
         p_order_6.set_uint("linxi_variable_ordering_strategy", 6);
         ts.push_back(try_for(mk_qfnra_nlsat_tactic(m, p_order_6), 5 * 1000));
-        // hzw
 
         params_ref p_order_3 = p;
         p_order_3.set_uint("linxi_variable_ordering_strategy", 3);
         // p_order_3.set_uint("seed", 17);
         ts.push_back(try_for(mk_qfnra_nlsat_tactic(m, p_order_3), 10 * 1000));
 
-
         params_ref p_order_1 = p;
         p_order_1.set_uint("linxi_variable_ordering_strategy", 1);
         ts.push_back(try_for(mk_qfnra_nlsat_tactic(m, p_order_1), 15 * 1000));
 
-        // wzh
+        
         params_ref p_order_5 = p;
         p_order_5.set_uint("linxi_variable_ordering_strategy", 5);
         ts.push_back(try_for(mk_qfnra_nlsat_tactic(m, p_order_5), 15 * 1000));
-        // hzw
+        
 
         params_ref p_order_2 = p;
         p_order_2.set_uint("linxi_variable_ordering_strategy", 2);
@@ -169,7 +182,7 @@ tactic * linxi_mk_qfnra_middle_solver(ast_manager& m, params_ref const& p) {
         // p_heuristic.set_uint("seed", 233);
         ts.push_back(try_for(mk_qfnra_nlsat_tactic(m, p_heuristic), 10 * 1000));
 
-        // wzh
+        
         params_ref p_order_4 = p;
         p_order_4.set_uint("linxi_variable_ordering_strategy", 4);
         ts.push_back(try_for(mk_qfnra_nlsat_tactic(m, p_order_4), 15 * 1000));
@@ -177,7 +190,7 @@ tactic * linxi_mk_qfnra_middle_solver(ast_manager& m, params_ref const& p) {
         params_ref p_order_6 = p;
         p_order_6.set_uint("linxi_variable_ordering_strategy", 6);
         ts.push_back(try_for(mk_qfnra_nlsat_tactic(m, p_order_6), 15 * 1000));
-        // hzw
+        
 
         params_ref p_order_3 = p;
         p_order_3.set_uint("linxi_variable_ordering_strategy", 3);
@@ -188,11 +201,11 @@ tactic * linxi_mk_qfnra_middle_solver(ast_manager& m, params_ref const& p) {
         p_order_1.set_uint("linxi_variable_ordering_strategy", 1);
         ts.push_back(try_for(mk_qfnra_nlsat_tactic(m, p_order_1), 20 * 1000));
 
-        // wzh
+        
         params_ref p_order_5 = p;
         p_order_5.set_uint("linxi_variable_ordering_strategy", 5);
         ts.push_back(try_for(mk_qfnra_nlsat_tactic(m, p_order_5), 20 * 1000));
-        // hzw
+        
 
         params_ref p_order_2 = p;
         p_order_2.set_uint("linxi_variable_ordering_strategy", 2);
@@ -227,7 +240,6 @@ tactic * linxi_mk_qfnra_large_solver(ast_manager& m, params_ref const& p) {
     }
     {
 
-        // wzh
         params_ref p_order_4 = p;
         p_order_4.set_uint("linxi_variable_ordering_strategy", 4);
         ts.push_back(try_for(mk_qfnra_nlsat_tactic(m, p_order_4), 15 * 1000));
@@ -235,7 +247,7 @@ tactic * linxi_mk_qfnra_large_solver(ast_manager& m, params_ref const& p) {
         params_ref p_order_6 = p;
         p_order_6.set_uint("linxi_variable_ordering_strategy", 6);
         ts.push_back(try_for(mk_qfnra_nlsat_tactic(m, p_order_6), 15 * 1000));
-        // hzw
+        
 
         params_ref p_order_3 = p;
         p_order_3.set_uint("linxi_variable_ordering_strategy", 3);
@@ -246,11 +258,11 @@ tactic * linxi_mk_qfnra_large_solver(ast_manager& m, params_ref const& p) {
         p_order_1.set_uint("linxi_variable_ordering_strategy", 1);
         ts.push_back(try_for(mk_qfnra_nlsat_tactic(m, p_order_1), 40 * 1000));
 
-        // wzh
+        
         params_ref p_order_5 = p;
         p_order_5.set_uint("linxi_variable_ordering_strategy", 5);
         ts.push_back(try_for(mk_qfnra_nlsat_tactic(m, p_order_5), 40 * 1000));
-        // hzw
+        
 
         params_ref p_order_2 = p;
         p_order_2.set_uint("linxi_variable_ordering_strategy", 2);
@@ -288,11 +300,11 @@ tactic * linxi_mk_qfnra_very_large_solver(ast_manager& m, params_ref const& p) {
         p_order_1.set_uint("linxi_variable_ordering_strategy", 1);
         ts.push_back(try_for(mk_qfnra_nlsat_tactic(m, p_order_1), 80 * 1000));
 
-        // wzh
+        
         params_ref p_order_5 = p;
         p_order_5.set_uint("linxi_variable_ordering_strategy", 5);
         ts.push_back(try_for(mk_qfnra_nlsat_tactic(m, p_order_5), 80 * 1000));
-        // hzw
+        
 
         params_ref p_order_2 = p;
         p_order_2.set_uint("linxi_variable_ordering_strategy", 2);
@@ -330,7 +342,11 @@ tactic * linxi_mk_qfnra_mixed_solver(ast_manager& m, params_ref const& p) {
 }
 
 tactic * mk_qfnra_tactic(ast_manager & m, params_ref const& p) {
+
     return and_then(mk_simplify_tactic(m, p), 
                     mk_propagate_values_tactic(m, p),
-                    linxi_mk_qfnra_mixed_solver(m, p));
+                    // mk_general_ls_tactic(m, p)
+                    // mk_multilinear_ls_tactic(m, p)
+                    linxi_mk_qfnra_mixed_solver(m, p)
+                );
 }

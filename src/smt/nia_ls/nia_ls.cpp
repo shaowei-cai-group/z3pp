@@ -1,5 +1,6 @@
 #include "nia_ls.h"
 #include <sstream>
+#define LS_DEBUG
 namespace nia{
 
 //random walk
@@ -35,7 +36,7 @@ void ls_solver::no_operation_random_walk(){
         return;
     }//boolean lit
     var_lit_term *vlt;//nia lit
-    __int128_t coff=0;//the coff = sum(term_coff*vlt_coff) ( 1 * x1*x2 ) + ( -1 * x1 ) + ( -1 * x3 ) for x1 the coff=(1*x2)+(-1)
+    __int128_t coffs[2]={0,0};//the coff = sum(term_coff*vlt_coff) ( 1 * x1*x2 ) + ( -1 * x1 ) + ( -1 * x3 ) for x1 the coff=(1*x2)+(-1)
     uint64_t var_idx_curr=l->var_lit_terms[0].var_idx;//the current var idx of var_lit_term
     int l_var_lit_term_num=(int)l->var_lit_terms.size();
     std::vector<uint64_t> var_idx_none_zero;//the vars with coff != 0
@@ -43,12 +44,12 @@ void ls_solver::no_operation_random_walk(){
     for(int vlt_idx=0;vlt_idx<l_var_lit_term_num;vlt_idx++){
         vlt=&(l->var_lit_terms[vlt_idx]);
         if(vlt->var_idx!=var_idx_curr){
-            coff=0;
+            coffs[0]=coffs[1]=0;
             var_idx_curr=vlt->var_idx;
         }//enter a new var
-        coff+=vlt->coff*coff_in_term(var_idx_curr, vlt->term_idx);//determine the coff
+        if(vlt->exponent<3){coffs[vlt->exponent-1]+=vlt->coff*coff_in_term(var_idx_curr, vlt->term_idx,vlt->exponent);}//determine the coff, for vars with only coff>2, the var will not be considered
         if((vlt_idx==l_var_lit_term_num-1)||(var_idx_curr!=l->var_lit_terms[vlt_idx+1].var_idx)){
-            if(coff!=0){var_idx_none_zero.push_back(var_idx_curr);}// if coff==0, changing the var cannot make any progress
+            if(coffs[0]!=0||coffs[1]!=0){var_idx_none_zero.push_back(var_idx_curr);}// if coff==0, changing the var cannot make any progress
         }//the last vlt of the var or the last vlt of the lit
     }
     if(var_idx_none_zero.size()==0){var_idx_curr=l->var_lit_terms[mt()%l_var_lit_term_num].var_idx;}
@@ -102,6 +103,11 @@ bool ls_solver::update_best_solution(){
     if(unsat_clauses->size()<best_found_this_restart){
         improve=true;
         best_found_this_restart=unsat_clauses->size();
+        if(_complete_ls){
+            for(uint64_t lit_idx=0;lit_idx<_num_lits;lit_idx++){
+                _best_literal_assignment[lit_idx]=(_lits[lit_idx].lits_index==0)?0:_lits[lit_idx].is_true;
+            }
+        }
     }
     if(unsat_clauses->size()<best_found_cost){
         improve=true;
@@ -139,43 +145,126 @@ void ls_solver::add_bool_operation(bool use_tabu, int lit_idx, int &operation_id
     }
 }
 
+//calculate the operation to be added for exp==1
+void ls_solver::add_coff(uint64_t var_idx_curr, bool use_tabu, int lit_idx, int &operation_idx,int coff_1){
+    lit *l=&(_lits[std::abs(lit_idx)]);
+    __int128_t lit_delta=l->delta;
+    if(l->is_equal){
+        if(lit_idx>0){
+            if(lit_delta%coff_1==0){insert_operation(var_idx_curr,(-lit_delta/coff_1), operation_idx,use_tabu);}
+        }//the delta should be 0, while it is now !=0, so the change value should be -delta/coff
+        else{
+            insert_operation(var_idx_curr,1, operation_idx,use_tabu);
+            insert_operation(var_idx_curr,-1, operation_idx,use_tabu);
+        }//the delta should be !=0, while it is now 0, so the change value should be +/- 1
+    }
+    else{
+        if(lit_idx>0){insert_operation(var_idx_curr, devide((-lit_delta), coff_1), operation_idx, use_tabu);}//the delta should be <=0, while it is now >0, so the change value should add -delta/coff
+        else{insert_operation(var_idx_curr, devide((1-lit_delta), coff_1), operation_idx, use_tabu);}//the delta should be >0, while it is now <=0, so the change value should add (1-delta)/coff
+    }
+}
+bool IsSqrt(int n,int &sq){
+    int i=1;
+    while(n>0){n-= i;i+=2;}
+    sq=(i-1)/2;
+    return 0==n?true:false;
+}
+
+//calculate the operation to be added for exp==2: a*x^2+b*x+c
+void ls_solver::add_coff(uint64_t var_idx_curr, bool use_tabu, int lit_idx, int &operation_idx,int a,int b,int c){
+    lit *l=&(_lits[std::abs(lit_idx)]);
+    int D=b*b-4*a*c;//b^2-4*a*c
+    int sq=0;//tend to be larger
+    bool is_D_sqrt=IsSqrt(D, sq);
+    int left_low=floor((double)(-b-sq)/(2*a));
+    int left_up=ceil((double)(-b-sq)/(2*a));
+    int right_low=floor((double)(-b+sq)/(2*a));
+    int right_up=ceil((double)(-b+sq)/(2*a));
+    if((D>0&&left_up==right_up)||(D==0&&left_up!=left_low)||(D<0)){return;}//no integer solution on the other side
+    if(l->is_equal){
+        if(lit_idx>0){
+            if(!is_D_sqrt){return;}//no integer solution for 0
+            if(left_up==left_low){insert_operation(var_idx_curr,left_up-_solution[var_idx_curr], operation_idx,use_tabu);}
+            if(D>0&&right_up==right_low){insert_operation(var_idx_curr,right_up-_solution[var_idx_curr], operation_idx,use_tabu);}
+        }//the delta should be 0, while it is now !=0
+        else{
+            insert_operation(var_idx_curr,1, operation_idx,use_tabu);
+            insert_operation(var_idx_curr,-1, operation_idx,use_tabu);
+        }//the delta should be !=0, while it is now 0, so the change value should be +/- 1
+    }
+    else{
+        if(lit_idx>0){
+            if(D==0&&a>0&&left_up==left_low){insert_operation(var_idx_curr, left_up-_solution[var_idx_curr], operation_idx, use_tabu);}//the only 0 solution is left_up
+            else if(D>0){
+                if(a>0){
+                    if(a*left_up*left_up+b*left_up+c>0){left_up++;}
+                    if(a*right_low*right_low+b*right_low+c>0){right_low--;}
+                    insert_operation(var_idx_curr, left_up-_solution[var_idx_curr], operation_idx, use_tabu);
+                    insert_operation(var_idx_curr, right_low-_solution[var_idx_curr], operation_idx, use_tabu);
+                }
+                else if(a<0){
+                    if(a*left_low*left_low+b*left_low+c>0){left_low--;}
+                    if(a*right_up*right_up+b*right_up+c>0){right_up++;}
+                    insert_operation(var_idx_curr, left_low-_solution[var_idx_curr], operation_idx, use_tabu);
+                    insert_operation(var_idx_curr, right_up-_solution[var_idx_curr], operation_idx, use_tabu);
+                }
+            }
+        }//the delta should be <=0, while it is now >0, so the change value should add -delta/coff
+        else{
+            if(D==0&&a>0){
+                insert_operation(var_idx_curr,1, operation_idx,use_tabu);
+                insert_operation(var_idx_curr,-1, operation_idx,use_tabu);
+            }
+            else if(D>0){
+                if(a>0){
+                    if(a*left_low*left_low+b*left_low+c<=0){left_low--;}
+                    if(a*right_up*right_up+b*right_up+c<=0){right_up++;}
+                    insert_operation(var_idx_curr, left_low-_solution[var_idx_curr], operation_idx, use_tabu);
+                    insert_operation(var_idx_curr, right_up-_solution[var_idx_curr], operation_idx, use_tabu);
+                }
+                else if(a<0){
+                    if(a*left_up*left_up+b*left_up+c<=0){left_up++;}
+                    if(a*right_low*right_low+b*right_low+c<=0){right_low--;}
+                    insert_operation(var_idx_curr, left_up-_solution[var_idx_curr], operation_idx, use_tabu);
+                    insert_operation(var_idx_curr, right_low-_solution[var_idx_curr], operation_idx, use_tabu);
+                }
+            }
+        }//the delta should be >0, while it is now <=0, so the change value should add (1-delta)/coff
+    }
+}//a*x^2+b*x+c
+
 //for a falsified NIA lit, choose critical move from it
 void ls_solver::add_operation_from_false_lit(bool use_tabu, int lit_idx, int &operation_idx){
     if(false_lit_occur->is_in_array(std::abs(lit_idx))){return;}//if the false lit has been considered, then the lit will not be considered repeatedly
     false_lit_occur->insert_element(std::abs(lit_idx));
+    int total_term_value=0;//the value of terms containing the var
     lit *l=&(_lits[std::abs(lit_idx)]);
-    __int128_t lit_delta=l->delta;
-    __int128_t coff=0;//the coff = sum(term_coff*vlt_coff) ( 1 * x1*x2 ) + ( -1 * x1 ) + ( -1 * x3 ) for x1 the coff=(1*x2)+(-1)
     uint64_t var_idx_curr=l->var_lit_terms[0].var_idx;//the current var idx of var_lit_term
     var_lit_term *vlt;
     int l_var_lit_term_num=(int)l->var_lit_terms.size();
+    bool too_high_exp=false;//if the exponent of var is larger than 2, then the var should be modified
+    int coffs[2]={0,0};//the coff = sum(term_coff*vlt_coff) ( 1 * x1*x2 ) + ( -1 * x1 ) + ( -1 * x3 ) for x1 the coff=(1*x2)+(-1)
     //go through the var_lit_term and insert critical move for each var
     for(int vlt_idx=0;vlt_idx<l_var_lit_term_num;vlt_idx++){
         vlt=&(l->var_lit_terms[vlt_idx]);
         if(vlt->var_idx!=var_idx_curr){
-            coff=0;
+            total_term_value=0;
+            coffs[0]=coffs[1]=0;//reset coffs
             var_idx_curr=vlt->var_idx;
+            too_high_exp=false;
         }//enter a new var
-        coff+=vlt->coff*coff_in_term(var_idx_curr, vlt->term_idx);//determine the coff
+        if(vlt->exponent>2){too_high_exp=true;}
+        if(too_high_exp){continue;}//if too high exponent, the operations will not be inserted
+        coffs[vlt->exponent-1]+=vlt->coff*coff_in_term(var_idx_curr, vlt->term_idx,vlt->exponent);//determine the coff
+        total_term_value+=vlt->coff*_terms[vlt->term_idx].value;
         if((vlt_idx==l_var_lit_term_num-1)||(var_idx_curr!=l->var_lit_terms[vlt_idx+1].var_idx)){
-            if(coff==0){
+            if(coffs[0]==0&&coffs[1]==0){
                 insert_operation(var_idx_curr, 1, operation_idx, use_tabu);
                 insert_operation(var_idx_curr, -1, operation_idx, use_tabu);
                 continue;
             }// if coff==0, change the var by 1
-            if(l->is_equal){
-                if(lit_idx>0){
-                    if(lit_delta%coff==0){insert_operation(var_idx_curr,(-lit_delta/coff), operation_idx,use_tabu);}
-                }//the delta should be 0, while it is now !=0, so the change value should be -delta/coff
-                else{
-                    insert_operation(var_idx_curr,1, operation_idx,use_tabu);
-                    insert_operation(var_idx_curr,-1, operation_idx,use_tabu);
-                }//the delta should be !=0, while it is now 0, so the change value should be +/- 1
-            }
-            else{
-                if(lit_idx>0){insert_operation(var_idx_curr, devide((-lit_delta), coff), operation_idx, use_tabu);}//the delta should be <=0, while it is now >0, so the change value should add -delta/coff
-                else{insert_operation(var_idx_curr, devide((1-lit_delta), coff), operation_idx, use_tabu);}//the delta should be >0, while it is now <=0, so the change value should add (1-delta)/coff
-            }
+            else if(coffs[1]==0){add_coff(var_idx_curr,use_tabu,lit_idx,operation_idx,coffs[0]);}//high coff is 1
+            else{add_coff(var_idx_curr,use_tabu,lit_idx,operation_idx,coffs[1],coffs[0],l->delta-total_term_value);}//high coff is 2
         }//the last vlt of the var or the last vlt of the lit
     }
 }
@@ -265,6 +354,27 @@ int ls_solver::pick_critical_move(__int128_t &best_value){
     random_walk();
     return -1;
 }
+
+void ls_solver::modify_frequency_in_unsat_clauses(){
+    int l_idx_abs=0;
+    int num_lits_in_unsat_clauses=0;
+    //record
+    for(int i=0;i<unsat_clauses->size();i++){
+        for(int l:_clauses[unsat_clauses->element_at(i)].literals){
+            l_idx_abs=std::abs(l);
+            if(!is_in_unsat_clause[l_idx_abs]){
+                is_in_unsat_clause[l_idx_abs]=true;
+                lits_in_unsat_clause[num_lits_in_unsat_clauses++]=l_idx_abs;
+                _frequency_in_unsat_clauses[l_idx_abs]++;
+            }
+        }
+    }
+    //revert
+    for(int i=0;i<num_lits_in_unsat_clauses;i++){
+        l_idx_abs=lits_in_unsat_clause[i];
+        is_in_unsat_clause[l_idx_abs]=false;
+    }
+}
 //make move
 void ls_solver::critical_move(uint64_t var_idx, __int128_t change_value){
     int direction=(change_value>0)?0:1;
@@ -275,11 +385,13 @@ void ls_solver::critical_move(uint64_t var_idx, __int128_t change_value){
         _solution[var_idx]+=change_value;
     }
     else{
+        last_op_var=UINT64_MAX;//if last operation is boolean operation, the var should no longer be banned
         int origin_score=_vars[var_idx].score;
         move_update(var_idx);
         _solution[var_idx]*=-1;
         _vars[var_idx].score=-origin_score;
     }
+    if(_record_frequency){modify_frequency_in_unsat_clauses();}
     //step
     if(_vars[var_idx].is_nia){
         last_move[2*var_idx+direction]=_step;
@@ -303,14 +415,18 @@ __int128_t ls_solver::delta_lit(lit &l){
     return delta;
 }
 
-__int128_t ls_solver::coff_in_term(uint64_t var_idx, uint64_t term_idx){
+__int128_t ls_solver::coff_in_term(uint64_t var_idx, uint64_t term_idx,int exponent){
     if(_terms[term_idx].var_epxs.size()==1){return 1;}//the term only contains the var
-    if(_solution[var_idx]!=0){return _terms[term_idx].value/_solution[var_idx];}//if the var!=0, the coff is value/var_solution
+    if(_solution[var_idx]!=0){
+        if(exponent==1){return _terms[term_idx].value/_solution[var_idx];}
+        else{return _terms[term_idx].value/(std::pow((long long)_solution[var_idx], exponent));}
+    }//if the var!=0, the coff is value/var_solution
     else{
         __int128_t coff=1;
         for(var_exp &ve:_terms[term_idx].var_epxs){
             if(ve.var_index==var_idx){continue;}//the var itself will not be counted
-            coff*=_solution[ve.var_index];
+            if(ve.exponent==1){coff*=_solution[ve.var_index];}
+            else{coff*=std::pow((long long)_solution[ve.var_index],ve.exponent);}
             if(coff==0){break;}
         }
         return coff;
@@ -333,10 +449,12 @@ __int128_t ls_solver::devide(__int128_t a, __int128_t b){
 }
 void ls_solver::insert_operation(uint64_t var_idx,__int128_t change_value,int &operation_idx,bool use_tabu){
     if(var_in_long_term->is_in_array((int)var_idx)){
-        for(uint64_t term_idx:_vars[var_idx].term_idxs){
-            term &t=_terms[term_idx];
-            if(t.var_epxs.size()>2){
-                __int128_t future_term_value=t.value+coff_in_term(var_idx, term_idx)*change_value;
+        for(term_exp &te:_vars[var_idx].term_exps){
+            term &t=_terms[te.term_idx];
+            if(t.var_epxs.size()>2||t.var_epxs[0].exponent>1){
+                __int128_t future_term_value;
+                if(te.exponent==1){future_term_value=t.value+coff_in_term(var_idx, te.term_idx,te.exponent)*change_value;}
+                else{future_term_value=coff_in_term(var_idx, te.term_idx,te.exponent)*std::pow((long long)(_solution[var_idx]+change_value),te.exponent);}
                 if(future_term_value>max_int||future_term_value<-max_int){return;}
             }
         }
@@ -345,6 +463,7 @@ void ls_solver::insert_operation(uint64_t var_idx,__int128_t change_value,int &o
     uint64_t direction=(change_value>0)?0:1;
     if(use_tabu&&_step<tabulist[2*var_idx+direction]){return;}// the operation is now tabued
     __int128_t future_solution=_solution[var_idx]+change_value;
+    if(future_solution>100000000||future_solution<-100000000){return;}
     bool no_pre_value=(_pre_value_1[var_idx]==INT32_MAX&&_pre_value_2[var_idx]==INT32_MAX&&future_solution>=_vars[var_idx].low_bound&&future_solution<=_vars[var_idx].upper_bound);
     bool has_pre_value_1=(_pre_value_1[var_idx]!=INT32_MAX&&_pre_value_2[var_idx]==INT32_MAX&&future_solution==_pre_value_1[var_idx]);
     bool has_pre_value_2=(_pre_value_1[var_idx]!=INT32_MAX&&_pre_value_2[var_idx]!=INT32_MAX&&(future_solution==_pre_value_1[var_idx]||future_solution==_pre_value_2[var_idx]));
@@ -386,12 +505,13 @@ void ls_solver::swap_from_small_weight_clause(){}
 //calculate score for nia vars
 int ls_solver::critical_score(uint64_t var_idx, __int128_t change_value){
     int critical_score=0;
+    __int128_t future_value=_solution[var_idx]+change_value;
     variable * var=&(_vars[var_idx]);
     var_lit_term *vlt;
     uint64_t curr_lit_idx=var->var_lit_terms[0].lit_idx;
     __int128_t curr_lit_delta_new=_lits[curr_lit_idx].delta;
     __int128_t coff;//(coff of original term) * (term_value / _solution[var]) ( 2 * x1*x2 ) x1=3, x2=4  -> coff[x2]=2*3
-    for(uint64_t term_idx:var->term_idxs){term_coffs[term_idx]=coff_in_term(var_idx, term_idx);}//determine the term coff
+    for(term_exp &te:var->term_exps){term_coffs[te.term_idx]=coff_in_term(var_idx, te.term_idx,te.exponent);}//determine the term coff
     //determine the lit_make_break by going through the vlt of var
     for(int vlt_idx=0;vlt_idx<var->var_lit_terms.size();vlt_idx++){
         vlt=&(var->var_lit_terms[vlt_idx]);
@@ -400,7 +520,8 @@ int ls_solver::critical_score(uint64_t var_idx, __int128_t change_value){
             curr_lit_delta_new=_lits[curr_lit_idx].delta;
         }//enter a new lit
         coff=vlt->coff*term_coffs[vlt->term_idx];
-        curr_lit_delta_new+=coff*change_value;
+        if(vlt->exponent==1){curr_lit_delta_new+=coff*change_value;}
+        else{curr_lit_delta_new+=coff*(std::pow((long long)future_value,vlt->exponent)-std::pow((long long)_solution[var_idx],vlt->exponent));}
         if((vlt_idx==var->var_lit_terms.size()-1)||(curr_lit_idx!=var->var_lit_terms[vlt_idx+1].lit_idx)){
             if(_lits[curr_lit_idx].is_equal){
                 if(_lits[curr_lit_idx].delta==0&&curr_lit_delta_new!=0){_lit_make_break[curr_lit_idx]=-1;}
@@ -433,11 +554,13 @@ void ls_solver::move_update(uint64_t var_idx, __int128_t change_value){
     uint64_t curr_lit_idx=var->var_lit_terms[0].lit_idx;
     __int128_t curr_lit_delta_new=_lits[curr_lit_idx].delta;
     __int128_t term_coff,lit_coff;
+    __int128_t future_value=_solution[var_idx]+change_value;
     //update term value
-    for(uint64_t term_idx:var->term_idxs){
-        term_coff=coff_in_term(var_idx, term_idx);
-        term_coffs[term_idx]=term_coff;
-        _terms[term_idx].value+=term_coff*change_value;
+    for(term_exp &te:var->term_exps){
+        term_coff=coff_in_term(var_idx, te.term_idx,te.exponent);
+        term_coffs[te.term_idx]=term_coff;
+        if(te.exponent==1){_terms[te.term_idx].value+=term_coff*change_value;}
+        else{_terms[te.term_idx].value=term_coff*std::pow((long long)(future_value),te.exponent);}
     }
     //determine the lit_is_true by going through the vlt of var, and update the delta of lits
     for(int vlt_idx=0;vlt_idx<var->var_lit_terms.size();vlt_idx++){
@@ -447,7 +570,8 @@ void ls_solver::move_update(uint64_t var_idx, __int128_t change_value){
             curr_lit_delta_new=_lits[curr_lit_idx].delta;
         }//enter a new lit
         lit_coff=term_coffs[vlt->term_idx]*vlt->coff;
-        curr_lit_delta_new+=lit_coff*change_value;
+        if(vlt->exponent==1){curr_lit_delta_new+=lit_coff*change_value;}
+        else{curr_lit_delta_new+=lit_coff*(std::pow((long long)future_value,vlt->exponent)-std::pow((long long)_solution[var_idx],vlt->exponent));}
         if((vlt_idx==var->var_lit_terms.size()-1)||(curr_lit_idx!=var->var_lit_terms[vlt_idx+1].lit_idx)){
             if(_lits[curr_lit_idx].is_equal){
                 if(_lits[curr_lit_idx].delta==0&&curr_lit_delta_new!=0){_lits[curr_lit_idx].is_true=-1;}
@@ -583,7 +707,8 @@ bool ls_solver::check_solution(){
         term *t=&(_terms[term_idx]);
         __int128_t new_term_value=1;
         for(var_exp &ve:t->var_epxs){
-            new_term_value*=_solution[ve.var_index];
+            if(ve.exponent==1){new_term_value*=_solution[ve.var_index];}
+            else{new_term_value*=std::pow((long long)_solution[ve.var_index],ve.exponent);}
             if(new_term_value==0){break;}
         }
         if(new_term_value!=_terms[term_idx].value){std::cout<<"term value wrong: "<<term_idx<<"\n";}
@@ -634,18 +759,19 @@ bool ls_solver::update_outer_best_solution(){
 
 void ls_solver::enter_nia_mode(){
     _best_found_hard_cost_this_nia=unsat_clauses->size();
-    no_improve_cnt_nia=0;
+    if(is_in_bool_search){no_improve_cnt_nia=0;}//only when it is now in boolean mode, the no_improve_cnt_nia will be 0
     is_in_bool_search=false;
 }
 
 void ls_solver::enter_bool_mode(){
     _best_found_hard_cost_this_bool=unsat_clauses->size();
-    no_improve_cnt_bool=0;
+    if(!is_in_bool_search){no_improve_cnt_bool=0;}//only when it is now in integer mode, the no_improve_cnt_bool will be 0
     is_in_bool_search=true;
 }
 
 //local search
 bool ls_solver::local_search(){
+    if(build_unsat){return false;}
     int no_improve_cnt=0;
     int flipv;
     __int128_t change_value=0;
@@ -654,12 +780,15 @@ bool ls_solver::local_search(){
     _outer_layer_step=1;
     for(_step=1;_step<_max_step;_step++){
         if(0==unsat_clauses->size()){
+#ifdef NLS_DEBUG
+            std::cout<<"step:"<<_step<<"\n";
+#endif
             // check_solution();
-            up_bool_vars();
+            // up_bool_vars();
             return true;}
         if(_step%1000==0&&(TimeElapsed()>_cutoff)){break;}
         if(no_improve_cnt>500000){initialize();no_improve_cnt=0;}//restart
-        bool time_up_bool=(no_improve_cnt_bool*_lit_in_unsat_clause_num>5*_bool_lit_in_unsat_clause_num)||(unsat_clauses->size()<=20);
+        bool time_up_bool=(no_improve_cnt_bool*_lit_in_unsat_clause_num>5*_bool_lit_in_unsat_clause_num);
         bool time_up_nia=(no_improve_cnt_nia*_lit_in_unsat_clause_num>20*(_lit_in_unsat_clause_num-_bool_lit_in_unsat_clause_num));
         if((is_in_bool_search&&_bool_lit_in_unsat_clause_num<_lit_in_unsat_clause_num&&time_up_bool)||_bool_lit_in_unsat_clause_num==0){enter_nia_mode();}
         else if((!is_in_bool_search&&_bool_lit_in_unsat_clause_num>0&&time_up_nia)||(_lit_in_unsat_clause_num==_bool_lit_in_unsat_clause_num)){enter_bool_mode();}

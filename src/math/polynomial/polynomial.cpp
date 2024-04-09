@@ -7476,7 +7476,6 @@ namespace polynomial {
         p->display_smt2(out, m_imp->m_manager, proc);
     }
 
-    // wzh
     int manager::sign_lower_inf(polynomial const * p, var x){
         unsigned deg = degree(p, x);
         scoped_numeral curr(this->m());
@@ -7543,7 +7542,7 @@ namespace polynomial {
             vec.push_back(neg(next.get()));
         } while(!is_const(next));
     }
-    // hzw
+    
 };
 
 polynomial::polynomial * convert(polynomial::manager & sm, polynomial::polynomial * p, polynomial::manager & tm,

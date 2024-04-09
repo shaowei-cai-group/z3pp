@@ -16,7 +16,7 @@ Author:
 Revision History:
 
 --*/
-#include<math.h>
+#include <math.h>
 #include "util/luby.h"
 #include "util/warning.h"
 #include "util/timeit.h"
@@ -41,7 +41,7 @@ Revision History:
 #include "smt/smt_model_finder.h"
 #include "smt/smt_parallel.h"
 #include "smt/smt_arith_value.h"
-#define LS_DEBUG
+#define NLS_DEBUG
 
 namespace smt {
 
@@ -81,8 +81,8 @@ namespace smt {
         m_mk_enode_trail(*this),
         m_mk_lambda_trail(*this) {
 
-        m_lia_ls_solver=new lia::ls_solver((int)m_fparams.m_random_seed,m_fparams.m_ls_time);
-        m_nia_ls_solver=new nia::ls_solver((int)m_fparams.m_random_seed);
+        m_lia_ls_solver = new lia::ls_solver((int)m_fparams.m_random_seed, m_fparams.m_ls_time);
+        m_nra_ls_solver = new nra::ls_solver((int)m_fparams.m_random_seed);
         SASSERT(m_scope_lvl == 0);
         SASSERT(m_base_lvl == 0);
         SASSERT(m_search_lvl == 0);
@@ -1787,7 +1787,9 @@ namespace smt {
         bool_var var;
         lbool phase = l_undef;
         m_case_split_queue->next_case_split(var, phase);
-
+#ifdef LS_DEBUG
+        std::cout<<"decide literal: "<<var<<"\n";
+#endif
         if (var == null_bool_var) {
             return false;
         }
@@ -1828,6 +1830,7 @@ namespace smt {
                 is_pos = true;
             }
             else {
+                //默认的phase_selection是conservative，就是默认使用保存的phase，400步将cache on设为on，100步将其设为off并用默认config，如果是conservative2会把默认的config取反
                 switch (m_fparams.m_phase_selection) {
                 case PS_THEORY: 
                     if (m_phase_cache_on && d.m_phase_available) {
@@ -1841,7 +1844,7 @@ namespace smt {
                             is_pos = th_phase == l_true;
                             break;
                         }
-                    }
+                    }//如果cache_on不开，并且该文字是在理论中有的，就调用理论值
                     if (track_occs()) {
                         if (m_lit_occs[l.index()] == 0) {
                             is_pos = false;
@@ -1851,13 +1854,13 @@ namespace smt {
                             is_pos = true;
                             break;
                         }
-                    }
+                    }//如果没有正出现就false，否则就true
                     is_pos = m_phase_default;                    
                     break;
                 case PS_CACHING:
                 case PS_CACHING_CONSERVATIVE:
                 case PS_CACHING_CONSERVATIVE2:
-                    if (m_phase_cache_on && d.m_phase_available) {
+                    if ((is_NIA || m_phase_cache_on) && d.m_phase_available) {
                         TRACE("phase_selection", tout << "using cached value, is_pos: " << m_bdata[var].m_phase << ", var: p" << var << "\n";);
                         is_pos = m_bdata[var].m_phase;
                     }
@@ -3527,44 +3530,45 @@ namespace smt {
         internalize_assertions();
         expr_ref_vector theory_assumptions(m);
         add_theory_assumptions(theory_assumptions);
+        std::string logic_name=m_setup.get_logic().str();
+        is_NIA=(logic_name=="QF_NIA");
+        bool is_IDL=(logic_name=="QF_IDL");
+        bool is_LIA=(logic_name=="QF_LIA");
+        bool is_NRA=(logic_name=="QF_NRA");
         if (!theory_assumptions.empty()) {
             TRACE("search", tout << "Adding theory assumptions to context" << std::endl;);
             return check(0, nullptr, reset_cancel);
         }
         else {
             TRACE("before_search", display(tout););
-            #ifdef NLS_DEBUG
-                std::cout<<"0\n"<<clauses_vec.size()<<"\n";
-                for(auto cl:clauses_vec){
-                    std::cout<<"(";
-                    for(auto l:cl){std::cout<<" "<<l;}
-                    std::cout<<" )\n";
-                }
-#endif
-            std::string logic_name=m_setup.get_logic().str();
-            bool is_NIA=(logic_name=="QF_NIA");
-            bool is_IDL=(logic_name=="QF_IDL");
-            bool is_LIA=(logic_name=="QF_LIA");
             if(is_NIA){
-                if(first_into_cxt){
-                    first_into_cxt=false;
-                    return check_finalize(search());
-                }
-                else{
-                    expr_bool_var_map(m_nia_ls_solver);
-                    m_nia_ls_solver->build_instance(clauses_vec);
-                    if(m_nia_ls_solver->has_high_coff){return check_finalize(l_undef);}
-                    m_nia_ls_solver->local_search();
-                    if(m_nia_ls_solver->best_found_cost==0){
+                // if(first_into_cxt){
+                //     first_into_cxt=false;
+                build_core_clauses();
+                print_clauses_vec(core_clauses);
+                nia::ls_solver *nia_ls_solver_tmp=new nia::ls_solver(0);
+                read_lits(nia_ls_solver_tmp);
+                has_high_coff=nia_ls_solver_tmp->is_high_coff();
+                delete nia_ls_solver_tmp;
+                if(has_high_coff){hybrid_time_limit=200000;}
+                return check_finalize(search());
+                // }
+                // else{
+                    nia::ls_solver *m_nia_ls_solver=new nia::ls_solver((int)m_fparams.m_random_seed);
+                    read_lits(m_nia_ls_solver);
+                    m_nia_ls_solver->build_instance(core_clauses);
+                    print_clauses_vec(core_clauses);
+                    if(m_nia_ls_solver->local_search()){
                         try{
                             m_model_generator->reset();
                             m_proto_model = m_model_generator->mk_model_ls(m_nia_ls_solver);
                         }
                         catch (default_exception& ex) {return check_finalize(l_undef);}
+                        delete m_nia_ls_solver;
                         return check_finalize(l_true);
                     }
                     return check_finalize(l_undef);
-                }
+                // }
             }//NIA case
             else if(is_LIA)
             {
@@ -3586,17 +3590,16 @@ namespace smt {
                     return check_finalize(l_undef);
                 }
             }//LIA case
-            else if(is_IDL)
-            {
-                if(first_into_cxt){
-                    first_into_cxt=false;
+            else if (is_IDL) {
+                if (first_into_cxt) {
+                    first_into_cxt = false;
                     return check_finalize(search());
                 }
                 else{
                     expr_bool_var_map(m_lia_ls_solver);
                     m_lia_ls_solver->build_instance(clauses_vec);
                     m_lia_ls_solver->local_search();
-                    if(m_lia_ls_solver->best_found_cost==0){
+                    if (m_lia_ls_solver->best_found_cost == 0){
                         m_model_generator->reset();
                         m_proto_model = m_model_generator->mk_model_ls(m_lia_ls_solver);
                         return check_finalize(l_true);
@@ -3604,7 +3607,26 @@ namespace smt {
                     return check_finalize(l_undef);
                 }
             }//IDL case
-            else{
+            else if (is_NRA) {
+                if (!m_fparams.m_use_ls){
+                    return check_finalize(search());
+                }
+                else {
+                    expr_bool_var_map(m_nra_ls_solver);
+                    print_clauses_vec(clauses_vec);
+                    if (m_nra_ls_solver->has_high_coff) {
+                        return check_finalize(l_undef);
+                    }
+                    m_nra_ls_solver->build_instance(clauses_vec);
+                    if (m_nra_ls_solver->local_search()) {
+                        m_model_generator->reset();
+                        m_proto_model = m_model_generator->mk_model_ls(m_nra_ls_solver);
+                        return check_finalize(l_true);
+                    }   //this is dedicated for LS
+                    return check_finalize(l_undef);
+                }
+            }
+            else {
                 return check_finalize(search());
             }
         }
@@ -3784,10 +3806,12 @@ namespace smt {
             SASSERT(!inconsistent());
 
             status = bounded_search();
+            //此时一轮搜索已经结束，已经进入过full assignment，并用T solver求解过
             TRACE("search_bug", tout << "status: " << status << ", inconsistent: " << inconsistent() << "\n";);
             TRACE("assigned_literals_per_lvl", display_num_assigned_literals_per_lvl(tout);
                   tout << ", num_assigned: " << m_assigned_literals.size() << "\n";);
 
+            if(hybrid_timeout){return l_undef;}
             if (!restart(status, curr_lvl)) {
                 break;
             }            
@@ -3801,9 +3825,124 @@ namespace smt {
         return status;
     }
 
-    bool context::restart(lbool& status, unsigned curr_lvl) {
-        SASSERT(status != l_true || !inconsistent());
+    void context::rephase(){
+#ifdef LS_DEBUG
+        for (expr * curr : m_b_internalized_stack) {
+            bool_var v=get_bool_var(curr);
+            std::cout<<v<<(m_bdata[v].m_phase?" true":" false")<<"\n";
+        }
+#endif
+        static uint64_t into_rephase_cnt=0;
+        switch (into_rephase_cnt++%4){
+        case 0:
+            for (expr * n : m_b_internalized_stack) {m_bdata[get_bool_var(n)].m_phase=((m_random() % 2)==0);}
+           break;
+        case 1:
+            for (expr * n : m_b_internalized_stack) {m_bdata[get_bool_var(n)].m_phase=false;}
+            break;
+        case 2:
+            for (expr * n : m_b_internalized_stack) {
+                bool_var v=get_bool_var(n);
+                m_bdata[v].m_phase=!m_bdata[v].m_phase;
+            }
+            break;
+        default:
+            break;
+        }
+    }
 
+    //determine the phase based on the best partial LS between a bounded search
+    void context::rephase_partial_ls(){
+        int pick_rand=rand() % 1000;
+        uint64_t partial_ls_vector_sz=partial_LS_phase_vec.size();
+        uint64_t sz=m_b_internalized_stack.size();
+        //Partial LS 50%
+        if((pick_rand-=500)<0){
+            for(uint64_t i =0;i<partial_ls_vector_sz;i++){
+                if(partial_LS_phase_vec[i]!=l_undef){m_bdata[i].m_phase=(partial_LS_phase_vec[i]==l_true)?true:false;}
+                else{m_bdata[i].m_phase=((m_random() % 2)==0);}
+            }
+        }
+        // //Partial LS reverse 10%
+        // if((pick_rand-=100)<0){
+        //     for(uint64_t i =0;i<partial_ls_vector_sz;i++){
+        //         if(partial_LS_phase_vec[i]!=l_undef){m_bdata[i].m_phase=(partial_LS_phase_vec[i]==l_true)?false:true;}
+        //         else{m_bdata[i].m_phase=((m_random() % 2)==0);}
+        //     }
+        // }
+        //reverse 
+        else if((pick_rand-=100)<0){
+            for (uint64_t i=0;i<sz;i++) {m_bdata[i].m_phase=!m_bdata[i].m_phase;}
+        }
+        //random
+        else if((pick_rand-=100)<0){
+            for (uint64_t i=0;i<sz;i++) {m_bdata[i].m_phase=((m_random() % 2)==0);}
+        }
+        //all true
+        else if((pick_rand-=100)<0){
+            for (uint64_t i=0;i<sz;i++) {m_bdata[i].m_phase=true;}
+        }
+        //all false
+        else if((pick_rand-=100)<0){
+            for (uint64_t i=0;i<sz;i++) {m_bdata[i].m_phase=false;}
+        }
+        //remain
+        else{
+
+        }
+
+    }
+
+    void context::rephase_complete_ls(){
+        int pick_rand=rand() % 1000;
+        uint64_t complete_ls_vector_sz=complete_LS_phase_vec.size();
+        uint64_t sz=m_b_internalized_stack.size();
+        //complete LS 50%
+        if((pick_rand-=500)<0){
+            for(uint64_t i =0;i<complete_ls_vector_sz;i++){
+                if(complete_LS_phase_vec[i]!=0){m_bdata[i].m_phase=(complete_LS_phase_vec[i]>0)?true:false;}
+                else{m_bdata[i].m_phase=((m_random() % 2)==0);}
+            }
+        }
+        // //Complete LS reverse 10%
+        // if((pick_rand-=100)<0){
+        //     for(uint64_t i =0;i<complete_ls_vector_sz;i++){
+        //         if(complete_LS_phase_vec[i]!=0){m_bdata[i].m_phase=(complete_LS_phase_vec[i]>0)?false:true;}
+        //         else{m_bdata[i].m_phase=((m_random() % 2)==0);}
+        //     }
+        // }
+        //reverse 
+        else if((pick_rand-=100)<0){
+            for (uint64_t i=0;i<sz;i++) {m_bdata[i].m_phase=!m_bdata[i].m_phase;}
+        }
+        //random
+        else if((pick_rand-=100)<0){
+            for (uint64_t i=0;i<sz;i++) {m_bdata[i].m_phase=((m_random() % 2)==0);}
+        }
+        //all true
+        else if((pick_rand-=100)<0){
+            for (uint64_t i=0;i<sz;i++) {m_bdata[i].m_phase=true;}
+        }
+        //all false
+        else if((pick_rand-=100)<0){
+            for (uint64_t i=0;i<sz;i++) {m_bdata[i].m_phase=false;}
+        }
+        //remain
+        else{
+
+        }
+    }
+
+    bool context::restart(lbool& status, unsigned curr_lvl) {
+        if(is_NIA){
+        rephase_partial_ls();
+        // rephase_complete_ls();
+        // rephase();
+        }
+        SASSERT(status != l_true || !inconsistent());
+#ifdef LS_DEBUG
+        std::cout<<"restart\n";
+#endif
         reset_model();
 
         if (m_last_search_failure != OK) {
@@ -3892,13 +4031,67 @@ namespace smt {
         }
     }
 
+    void context::call_ls(const std::vector<std::vector<int> >& cl_vec, uint64_t ls_max_step,bool complete_ls,int &ls_best_found_cost,bool record_frequency){
+        static int into_ls=1;
+        static int into_partial_ls=1;
+        static bool has_unidentified_lits=false;
+#ifdef LS_DEBUG
+        std::cout<<"into LS "<<into_ls<<"\nmax step:"<<ls_max_step<<"\n";
+        print_clauses_vec(clauses_vec);
+#endif
+        into_ls++;
+        if(!complete_ls){into_partial_ls++;}
+        record_frequency= ( ( (into_partial_ls % 20) ==0)||complete_ls);
+        nia::ls_solver *nia_ls_solver=new nia::ls_solver((int)m_fparams.m_random_seed+into_ls,ls_max_step,complete_ls,record_frequency);
+        if(!has_unidentified_lits){
+            read_lits(nia_ls_solver,false);
+            has_unidentified_lits=nia_ls_solver->has_unidentified_lits;
+        }
+        if(!has_unidentified_lits){
+        nia_ls_solver->build_instance(cl_vec);
+        if(nia_ls_solver->local_search()){
+            std::cout<<"sat\n";
+            std::exit(0);
+        }
+        if(complete_ls){save_phase_complete(nia_ls_solver);}
+        if(record_frequency){modify_activity_by_LS(nia_ls_solver);}
+        ls_best_found_cost=nia_ls_solver->best_found_cost;
+        delete nia_ls_solver;
+        }        
+    }
+
     lbool context::bounded_search() {
         unsigned counter = 0;
 
         TRACE("bounded_search", tout << "starting bounded search...\n";);
 
+        bool after_resove_with_false_clause=true;//after 5 times resolve with false clauses, into the LS
+        int resolve_count=0;
+        int resolve_gap=3;
+        int after_resolve_decide_cnt=0;
+        uint64_t after_resolve_decide_gap=4;
+        uint64_t partial_ls_step=30000;//step for the partial LS
+        static uint64_t complete_ls_step=30000;//step for the complete LS
+        static int restart_cnt=1;
+        static int restart_gap=1;
+        static int restart_threshold=1;
+        int best_found_cost_partial_ls=INT32_MAX;//the best found cost of partial LS in each restart
+        int current_found_partial_ls=INT32_MAX;
+        int current_found_complete_ls=INT32_MAX;
+#ifdef LS_DEBUG
+        std::cout<<"restart cnt: "<<restart_cnt<<"\n";
+#endif
+        if(is_NIA){
+        if(restart_cnt>=restart_threshold){
+            restart_threshold*=2;
+            call_ls(core_clauses,complete_ls_step,true,current_found_complete_ls);
+            if(complete_ls_step<300000){complete_ls_step+=10000;}
+        }
+        }
+        restart_cnt++;
         while (true) {
             while (!propagate()) {
+                //now there is conflict
                 TRACE_CODE({
                     static bool first_propagate = true;
                     if (first_propagate) {
@@ -3908,10 +4101,36 @@ namespace smt {
                 });
 
                 tick(counter);
-
+                //冲突归结与回退
                 if (!resolve_conflict())
                     return l_false;
 
+#ifdef LS_DEBUG
+                std::cout<<"after resolve conflict::";
+                if(check_original_clauses(core_clauses)){std::cout<<"all clauses true\n";}
+                else{std::cout<<"no false!!!\n";}
+#endif
+#ifdef LS_DEBUG
+                std::cout<<"resolve count "<<resolve_count<<"  \n";
+#endif
+                if(is_NIA){
+                if(!after_resove_with_false_clause){
+                    if(!check_original_clauses(core_clauses)){
+                        resolve_count++;
+                        if(resolve_count>resolve_gap){
+                            resolve_gap++;
+                            after_resove_with_false_clause=true;
+                            resolve_count=0;
+                            after_resolve_decide_cnt=0;
+                            after_resolve_decide_gap=4;
+                        }
+                    }
+                }//search for the condition for resolve_with_false_clause
+                else{
+                    after_resolve_decide_cnt=0;
+                    if(after_resolve_decide_gap>=16){after_resolve_decide_gap=(after_resolve_decide_gap>>2);}
+                }//if resolve when searching for all_true, reset the decide cnt, and shrink the gap
+                }
                 SASSERT(m_scope_lvl >= m_base_lvl);
 
                 if (!inconsistent()) {
@@ -3941,6 +4160,11 @@ namespace smt {
                 m_dyn_ack_manager.propagate_eh();
                 CASSERT("dyn_ack", check_clauses(m_lemmas) && check_clauses(m_aux_clauses));
             }
+            //如果已经不能继续传播，并且也没有冲突了，就要考虑decide了
+            if(has_high_coff&&m_timer.ms_timeout(hybrid_time_limit)){
+                hybrid_timeout=true;
+                return l_undef;
+            }
 
             if (resource_limits_exceeded() && !inconsistent()) {
                 return l_undef;
@@ -3952,6 +4176,34 @@ namespace smt {
             if (m_base_lvl == m_scope_lvl && m_fparams.m_simplify_clauses)
                 simplify_clauses();
 
+            //尝试decide，如果已经不能decide了，说明所有的文字都已经赋值了
+#ifdef LS_DEBUG
+            std::cout<<"start decide:::";
+            if(check_original_clauses(core_clauses)){std::cout<<"all clauses true\n";}
+            else{std::cout<<"no false!!!\n";}
+#endif
+            if(is_NIA){
+            if(after_resove_with_false_clause){
+                if((after_resolve_decide_cnt++)>=after_resolve_decide_gap){
+#ifdef LS_DEBUG
+                    std::cout<<"after resolve decide cnt: "<<after_resolve_decide_cnt<<" gap: "<<after_resolve_decide_gap<<" \n";
+#endif
+                    after_resolve_decide_gap=(after_resolve_decide_gap<<1);//if decide_cnt>gap, expand the gap
+                    if(check_original_clauses(core_clauses)){
+                        resolve_count=0;
+                        after_resove_with_false_clause=false;
+                        extract_true_clause(core_clauses,clauses_vec);
+                    call_ls(clauses_vec,partial_ls_step,false,current_found_partial_ls);
+                    if(current_found_partial_ls<best_found_cost_partial_ls){
+                        best_found_cost_partial_ls=current_found_partial_ls;
+                        save_phase_partial();
+                    }
+                    if(partial_ls_step>10000){partial_ls_step-=10000;}
+                    }
+                }
+                
+            }
+            }
             if (!decide()) {
                 if (inconsistent()) 
                     return l_false;
@@ -3962,7 +4214,7 @@ namespace smt {
                     log_stats();
                     return l_true;
                 case FC_CONTINUE:
-                    break;
+                    break;//如果是FC_continue会加入一些新的lemma，进入之后的传播
                 case FC_GIVEUP:
                     return l_undef;
                 }
@@ -4008,7 +4260,11 @@ namespace smt {
         return false;
     }
 
+//进入final_check时总是所有的文字都已经赋值完成了
     final_check_status context::final_check() {
+#ifdef LS_DEBUG
+        std::cout<<"into final check\n";
+#endif
         TRACE("final_check", tout << "final_check inconsistent: " << inconsistent() << "\n"; display(tout); display_normalized_enodes(tout););
         CASSERT("relevancy", check_relevancy());
         
@@ -4040,7 +4296,7 @@ namespace smt {
             if (m_final_check_idx < num_th) {
                 theory * th = m_theory_set[m_final_check_idx];
                 IF_VERBOSE(100, verbose_stream() << "(smt.final-check \"" << th->get_name() << "\")\n";);
-                ok = th->final_check_eh();
+                ok = th->final_check_eh();//当context给所有的布尔变量的赋值了，并且没有冲突，才会进入理论的final_check
                 TRACE("final_check_step", tout << "final check '" << th->get_name() << " ok: " << ok << " inconsistent " << inconsistent() << "\n";);
                 if (ok == FC_GIVEUP) {
                     f  = THEORY;
@@ -4105,7 +4361,7 @@ namespace smt {
         }
     }
 
-
+//冲突归结，并做回退
     bool context::resolve_conflict() {
         m_stats.m_num_conflicts++;
         m_num_conflicts ++;
@@ -4122,7 +4378,7 @@ namespace smt {
         if (m_fparams.m_phase_selection == PS_THEORY || 
             m_fparams.m_phase_selection == PS_CACHING_CONSERVATIVE || 
             m_fparams.m_phase_selection == PS_CACHING_CONSERVATIVE2)
-            forget_phase_of_vars_in_current_level();
+            forget_phase_of_vars_in_current_level();//冲突归结之初要将所有本决策层的已经赋值的var的phase都变得不可获取
         m_atom_propagation_queue.reset();
         m_eq_propagation_queue.reset();
         m_th_eq_propagation_queue.reset();
@@ -4717,6 +4973,134 @@ namespace smt {
     void context::add_rec_funs_to_model() {
         if (m_model)
             m_model->add_rec_funs();
+    }
+
+    //return true if the original clauses has been satisfied
+    bool context::check_original_clauses(const std::vector<std::vector<int> >& vec){
+#ifdef LS_DEBUG
+        std::cout<<"check original clause ";
+#endif
+        for(auto const &cl:vec){
+            bool flag=false;
+            for(auto const &l:cl){
+                if((l>0&&get_assignment(l)==l_true)||(l<0&&get_assignment(-l)==l_false)||(l==0)){
+                    flag=true;
+                    break;
+                }
+            }
+            if(!flag){
+#ifdef LS_DEBUG
+                std::cout<<"false!!\n";
+#endif
+                return false;
+            }
+        }
+#ifdef LS_DEBUG
+        std::cout<<"all true!!\n";
+#endif
+        return true;
+    }
+
+    //return true if there exist conflict clause
+    bool context::check_conflict(const std::vector<std::vector<int> >& vec){
+        for(auto const  &cl:vec){
+            bool all_false_flag=true;
+            for(auto const &l:cl){
+                if(!(l>0&&get_assignment(l)==l_false)&&!(l<0&&get_assignment(-l)==l_true)){
+                    all_false_flag=false;
+                    break;
+                }
+            }
+            if(all_false_flag){return true;}
+        }
+        return false;
+    }
+    
+    //print all internalized literals
+    void context::get_all_assignments(){
+        uint64_t sz = m_b_internalized_stack.size();
+        for (uint64_t i = 0; i < sz; i++) {
+            expr *  n  = m_b_internalized_stack.get(i);
+            bool_var v = get_bool_var_of_id(n->get_id());
+            literal l_curr=get_literal(n);
+            std::cout<<l_curr.var()<<" ";
+            smt::display(std::cout,l_curr,m,m_bool_var2expr.data());
+            std::cout<<"\n"<<get_assignment(l_curr)<<"\n";
+        }
+    }
+
+    void context::extract_true_clause(const std::vector<std::vector<int> >& origin_vec, std::vector<std::vector<int> >& new_vec){
+        new_vec.clear();
+        uint64_t origin_vec_size=origin_vec.size();
+        uint64_t new_vec_idx=0;
+        std::vector<int> cls_tmp;
+        new_vec.resize(origin_vec_size);
+        for(int cls_idx=0;cls_idx<origin_vec_size;cls_idx++){
+            cls_tmp.clear();
+            for(auto l:origin_vec[cls_idx]){
+                if((l>0&&get_assignment(l)==l_true)||(l<0&&get_assignment(-l)==l_false)||(l==0)){
+                    cls_tmp.push_back(l);
+                }
+            }
+            new_vec[cls_idx]=cls_tmp;
+        }
+    }
+
+    void context::extract_true_clause(std::vector<std::vector<int> >& new_vec){
+        new_vec.clear();
+        new_vec.resize(origin_lit_num);
+        std::vector<bool> appear_sat_in_clause(origin_lit_num,false);
+        for(int cls_idx=0;cls_idx<core_clauses.size();cls_idx++){
+            for(auto l:core_clauses[cls_idx]){
+                if((l>0&&get_assignment(l)==l_true)||(l<0&&get_assignment(-l)==l_false)||(l==0)){
+                    appear_sat_in_clause[std::abs(l)]=true;//it appear true in current assignment
+                }
+            }
+        }
+        std::vector<int> cls_tmp;
+        for(int l=0;l<origin_lit_num;l++){
+            cls_tmp.clear();
+            if(get_assignment(l)==l_undef||appear_sat_in_clause[l]==false){cls_tmp.push_back(0);}
+            if(get_assignment(l)==l_true){cls_tmp.push_back(l);}
+            else if(get_assignment(l)==l_false){cls_tmp.push_back(-l);}
+            new_vec[l]=cls_tmp;
+        }
+    }
+    //dedicated for complete local search, reserve the phase of complete local search
+    void context::save_phase_complete(nia::ls_solver *solver){
+        uint64_t sz=solver->_num_lits;
+        for(uint64_t i=0;i<sz;i++){
+            complete_LS_phase_vec[i]=solver->_best_literal_assignment[i];
+#ifdef LS_DEBUG
+            std::cout<<"literal: "<<i<<"is true?:"<<(complete_LS_phase_vec[i]?"yes":"no")<<"\n";
+#endif
+        }
+    }
+
+    //dedicated for partial local search, reserve the phase of the current literal assignment
+    void context::save_phase_partial(){
+        for(uint64_t i=0;i<origin_lit_num;i++){
+            partial_LS_phase_vec[i]=get_assignment(i);
+#ifdef LS_DEBUG
+            std::cout<<"literal: "<<i<<"is true?:"<<(partial_LS_phase_vec[i]?"yes":"no")<<"\n";
+#endif
+        }
+    }
+
+    void context::modify_activity_by_LS(nia::ls_solver *solver){
+        for(int v=0;v<origin_lit_num;v++){
+            double & act=m_activity[v];
+#ifdef LS_DEBUG
+            std::cout<<"v:"<<v<<" "<<act;
+#endif
+            act += 200*m_bvar_inc*(double)solver->_frequency_in_unsat_clauses[v]/(double)solver->_max_step;
+#ifdef LS_DEBUG
+            std::cout<<" -> "<<act<<"\n";
+#endif
+            if (act > ACTIVITY_LIMIT)
+                rescale_bool_var_activity();
+            m_case_split_queue->activity_increased_eh(v);
+        }
     }
 
 };

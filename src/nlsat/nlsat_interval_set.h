@@ -26,7 +26,30 @@ namespace nlsat {
       
     class interval_set;
 
+    // Algebraic number, together with open-closed and score
+    struct anum_boundary {
+        anum value;
+        bool is_open;
+        int score;
+        // insertion from
+        unsigned_vector m_clauses;
+        anum_boundary(anum const & _v, bool _is_open, int _score, unsigned c_idx): value(_v), is_open(_is_open), score(_score) 
+        {
+            m_clauses.reset();
+            m_clauses.push_back(c_idx);
+        }
+    };
+
+    struct lt_anum_boundary {
+        anum_manager & m_am;
+        lt_anum_boundary(anum_manager & _m): m_am(_m) {}
+        bool operator()(anum_boundary const & a1, anum_boundary const &a2) const {
+            return m_am.lt(a1.value, a2.value) || (m_am.eq(a1.value, a2.value) && a1.is_open < a2.is_open);
+        }
+    };
+
     class interval_set_manager {
+        anum m_one, m_zero, m_max, m_min, m_neg_max, m_10k;
         anum_manager &           m_am;
         small_object_allocator & m_allocator;
         svector<char>            m_already_visited;
@@ -56,6 +79,29 @@ namespace nlsat {
         */
         interval_set * mk_union(interval_set const * s1, interval_set const * s2);
         
+
+        void set_const_anum();
+        interval_set * mk_point_interval(anum const & w);
+        interval_set * mk_complement(interval_set const * s);
+        interval_set * mk_complement(anum const & w);
+        interval_set * mk_intersection(interval_set const * s1, interval_set const * s2);
+        interval_set * mk_full();
+        bool contains_zero(interval_set const * s) const;
+        bool interval_contains_zero(interval inter) const;
+   
+        bool peek_in_complement_zero(interval_set const * s, anum & w);
+        bool peek_in_complement_lower_int(interval_set const * s, anum & w);
+        bool peek_in_complement_lower_far(interval_set const * s, anum & w);
+        bool peek_in_complement_upper_int(interval_set const * s, anum & w);
+        bool peek_in_complement_upper_far(interval_set const * s, anum & w);
+        void peek_in_complement_middle(interval_set const * s, anum_vector & vec);
+        void peek_in_complement_threshold(interval_set const * s, anum_vector & vec);
+        void peek_in_complement_threshold_integer(interval_set const * s, anum_vector & vec);
+
+        bool contains_value(anum_vector const & vec, anum const & w);
+        bool is_rational(anum const & val);
+        void peek_in_complement_heuristic(interval_set const * s, anum_vector & vec);
+
         /**
            \brief Reference counting
         */
@@ -110,10 +156,21 @@ namespace nlsat {
            
            \pre !is_full(s)
         */
+        void peek_in_complement(interval_set const * s, bool is_int, anum & w, bool randomize);
         void peek_in_complement(interval_set const * s, bool is_int, anum & w, bool randomize, bool linxi_set_0_more);
 //#linxi begin set0more
         int compare_interval_with_zero(const interval &now, const scoped_anum &zero);
 //#linxi end set0more
+
+        void push_boundary(vector<anum_boundary> & boundaries, anum const & val, bool is_open, int inc_weight, unsigned c_idx);
+
+        void add_boundaries(interval_set const * s, vector<anum_boundary> & boundaries, int & start_score, int weight, unsigned c_idx);
+
+        void add_boundaries(interval_set const * s, vector<anum_boundary> & boundaries, int & start_score, int weight);
+
+        bool contain_both_infinities(interval_set const * s);
+
+        bool has_infeasible_boundary(interval_set const * s, anum const & val);
     };
 
     typedef obj_ref<interval_set, interval_set_manager> interval_set_ref;
@@ -123,5 +180,6 @@ namespace nlsat {
         return out;
     }
 
+    using interval_set_vector = vector<interval_set *>;
 };
 

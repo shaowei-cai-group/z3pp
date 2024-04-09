@@ -1723,10 +1723,10 @@ void cmd_context::check_sat(unsigned num_assumptions, expr * const * assumptions
         regular_stream() << "unknown" << std::endl;
         return;
     }
+    display_sat_result(r);
     if (r == l_true) {
         validate_model();
-    }//validate mode before print SAT, if invalid, output unknown directly
-    display_sat_result(r);
+    }
     validate_check_sat_result(r);
     model_ref md;
     if (r == l_true && m_params.m_dump_models && is_model_available(md)) {
@@ -1997,7 +1997,7 @@ void cmd_context::complete_model(model_ref& md) const {
 */
 void cmd_context::validate_model() {
     model_ref md;
-    if (!validate_model_enabled()&&m_logic!="QF_NIA")//if it is QF_NIA, it will validate model
+    if (!validate_model_enabled())
         return;
     if (!is_model_available(md))
         return;
@@ -2049,8 +2049,6 @@ void cmd_context::validate_model() {
             }
         }
         if (invalid_model) {
-            std::cout<<"unknown\n";//invalid model will output unknown directly
-            std::exit(0);
             throw cmd_exception("an invalid model was generated");
         }
     }

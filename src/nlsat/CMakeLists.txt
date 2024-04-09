@@ -9,6 +9,7 @@ z3_add_component(nlsat
     nlsat_simple_checker.cpp
     nlsat_variable_ordering_strategy.cpp
     nlsat_symmetry_checker.cpp
+    nlsat_local_search.cpp
     COMPONENT_DEPENDENCIES
     polynomial
     sat

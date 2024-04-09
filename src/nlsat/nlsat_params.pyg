@@ -3,9 +3,12 @@ def_module_params('nlsat',
                   description='nonlinear solver',
                   export=True,
                   params=(max_memory_param(),
+                  
+                          ('general_local_search', BOOL, False, "general local search"),
+
                           ('linxi_simple_check', BOOL, False, "linxi precheck about variables sign"),
                           ('linxi_variable_ordering_strategy', UINT, 0, "linxi Variable Ordering Strategy, 0 for none, 1 for BROWN, 2 for TRIANGULAR, 3 for ONLYPOLY"),
-                          ('wzh_sample', BOOL, True, "wzh sample projection"),
+                          ('cell_sample', BOOL, True, "cell sample projection"),
                           ('linxi_symmetry_check', BOOL, False, "linxi symmetry check and learning"),
                           ('linxi_set_0_more', BOOL, True, "linxi set 0 as more as we can"),
                           

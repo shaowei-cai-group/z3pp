@@ -1,5 +1,6 @@
 #include"nia_ls.h"
 #include <sstream>
+#define LS_DEBUG
 namespace nia{
 //print
 void ls_solver::print_formula(){
@@ -202,5 +203,19 @@ void ls_solver::up_bool_vars(){//reconstruct the solution by pop the stack
             _resolution_vars[l->delta].up_bool=1;
         }//if the clause is false, flip the var
     }
+}
+
+bool ls_solver::get_lits_value(uint64_t lit_idx,const std::string & str){
+#ifdef NLS_DEBUG
+    std::cout<<str<<"\n";
+#endif
+    if(lit_idx<_num_lits&&_lits[lit_idx].lits_index!=0){
+        std::cout<<lit_idx<<" :::"<<_lits[lit_idx].is_true<<"\n";
+        return _lits[lit_idx].is_true>0;
+    }
+    else{
+
+    }
+    return true;
 }
 }

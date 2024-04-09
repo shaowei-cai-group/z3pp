@@ -581,9 +581,11 @@ inline rational operator*(rational const & r1, bool r2) {
     UNREACHABLE();
     return r1 * rational(r2);
 }
+
 inline rational operator*(rational const & r1, int r2) {
     return r1 * rational(r2);
 }
+
 inline rational operator*(bool  r1, rational const & r2) {
     UNREACHABLE();
     return rational(r1) * r2;
@@ -615,19 +617,37 @@ inline rational power(rational const & r, unsigned p) {
 }
 
 inline rational abs(rational const & r) {
-  rational result(r);
-  rational::m().abs(result.m_val);
-  return result;
+    rational result(r);
+    rational::m().abs(result.m_val);
+    return result;
 }
 
 inline rational gcd(rational const & r1, rational const & r2) {
-  rational result;
-  rational::m().gcd(r1.m_val, r2.m_val, result.m_val);
-  return result;
+    rational result;
+    rational::m().gcd(r1.m_val, r2.m_val, result.m_val);
+    return result;
 }
 
 inline rational gcd(rational const & r1, rational const & r2, rational & a, rational & b) {
-  rational result;
-  rational::m().gcd(r1.m_val, r2.m_val, a.m_val, b.m_val, result.m_val);
-  return result;
+    rational result;
+    rational::m().gcd(r1.m_val, r2.m_val, a.m_val, b.m_val, result.m_val);
+    return result;
+}
+
+inline rational diff_ceil(rational & r) {
+    rational result = r;
+    if (r.is_int()) {
+        return result + rational(1);
+    } else {
+        return ceil(r);
+    }
+}
+
+inline rational diff_floor(rational & r) {
+    rational result = r;
+    if (r.is_int()) {
+        return result - rational(1);
+    } else{
+        return floor(r);
+    }
 }

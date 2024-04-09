@@ -15,7 +15,7 @@
 #include<unistd.h>
 #include<sys/types.h>
 #include<string>
-#include "sls/lia_ls/lia_Array.h"
+#include "smt/lia_ls/lia_Array.h"
 
 namespace lia {
 const __int128_t max_int=__int128_t(INT64_MAX)*__int128_t(INT64_MAX);

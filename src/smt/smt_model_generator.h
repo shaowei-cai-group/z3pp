@@ -32,8 +32,9 @@ Revision History:
 #include "util/obj_hashtable.h"
 #include "util/map.h"
 #include "util/ref.h"
-#include "sls/lia_ls/lia_ls.h"
-#include "sls/nia_ls/nia_ls.h"
+#include "smt/lia_ls/lia_ls.h"
+#include "smt/nra_ls/nra_ls.h"
+#include "smt/nia_ls/nia_ls.h"
 
 class value_factory;
 class proto_model;
@@ -191,11 +192,13 @@ namespace smt {
         void init_model();
         void mk_bool_model();
         void mk_bool_model(nia::ls_solver *solver);
+        void mk_bool_model(nra::ls_solver *solver);
         void mk_bool_model(lia::ls_solver *solver);
         void mk_value_procs(obj_map<enode, model_value_proc *> & root2proc, ptr_vector<enode> & roots,  ptr_vector<model_value_proc> & procs);
         void mk_values();
         void mk_values_ls(lia::ls_solver *solver);
         void mk_values_ls(nia::ls_solver *solver);
+        void mk_values_ls(nra::ls_solver *solver);
         bool include_func_interp(func_decl * f) const;
         void mk_func_interps();
         void finalize_theory_models();
@@ -235,6 +238,7 @@ namespace smt {
         proto_model* mk_model();
         proto_model* mk_model_ls(lia::ls_solver * solver);
         proto_model* mk_model_ls(nia::ls_solver * solver);
+        proto_model* mk_model_ls(nra::ls_solver * solver);
 
         obj_map<enode, app *> const & get_root2value() const { return m_root2value; }
         app * get_value(enode * n) const;

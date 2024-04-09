@@ -131,8 +131,7 @@ tactic * mk_qfnia_tactic(ast_manager & m, params_ref const & p) {
         mk_report_verbose_tactic("(qfnia-tactic)", 10),
         mk_qfnia_preamble(m, p),
         or_else(
-            try_for(mk_qfnia_smt_solver(m,p),200000)
-            ,mk_qfnia_smt_solver(m,p)
+            mk_qfnia_smt_solver(m,p)
             ,mk_qfnia_sat_solver(m, p)
             ,mk_qfnia_sat_solver_large(m, p,12)
             ,mk_qfnia_nlsat_solver(m, p)

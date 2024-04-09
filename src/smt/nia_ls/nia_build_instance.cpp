@@ -1,4 +1,5 @@
 #include "nia_ls.h"
+#define NLS_DEBUG
 namespace nia{
 //input transformation
 void ls_solver::split_string(std::string &in_string, std::vector<std::string> &str_vec,std::string pattern=" "){
@@ -15,12 +16,37 @@ void ls_solver::split_string(std::string &in_string, std::vector<std::string> &s
     }
 }
 
+bool cmp_ve(const var_exp & ve1,const var_exp & ve2){return (ve1.var_index<ve2.var_index)||(ve1.var_index==ve2.var_index&&ve1.exponent<ve2.exponent);}
+
+bool is_same_cls(const std::vector<int> & cl_1,const std::vector<int> & cl_2){
+    if(cl_1.size()!=cl_2.size()){return false;}
+    else{for(int l_idx=0;l_idx<cl_1.size();l_idx++){if(cl_1[l_idx]!=cl_2[l_idx]){return false;}}}
+    return true;
+}
+
+void ls_solver::modify_term_exp(term &t){
+    if(t.var_epxs.size()>3){has_unidentified_lits=true;}
+    std::sort(t.var_epxs.begin(),t.var_epxs.end(),cmp_ve);
+    int ve_size=0;
+    for(int curr_ve_idx=1;curr_ve_idx<t.var_epxs.size();curr_ve_idx++){
+        if(t.var_epxs[curr_ve_idx].var_index!=t.var_epxs[ve_size].var_index){
+            t.var_epxs[++ve_size].var_index=t.var_epxs[curr_ve_idx].var_index;
+            t.var_epxs[ve_size].exponent=1;
+        }//enter the next var
+        else{t.var_epxs[ve_size].exponent++;}//the same var
+    }
+    if(++ve_size<t.var_epxs.size()){t.var_epxs.resize(ve_size);}
+}//(* x x y) --> (* x^2 y)
+
+int if_cnt=0;
 void ls_solver::build_lits(std::string &in_string){
     std::vector<std::string> vec;
     split_string(in_string, vec);
     if(vec[0]=="0"){_lits[0].lits_index=0; return;}//true literal
     int lit_index=std::atoi(vec[0].c_str());
     lit *l=&(_lits[lit_index]);
+    if(vec[1]=="if"&&!_complete_ls){has_unidentified_lits=true;return;}
+    if(vec[1]=="if"){if_cnt++;}
     if(vec[1]=="or"||vec[1]=="if"){
         l->delta=transfer_name_to_resolution_var(vec[2], false);
         l->key=1;
@@ -29,6 +55,14 @@ void ls_solver::build_lits(std::string &in_string){
         return;
     }//or term in the form: 1 or newvar_2
     if(vec.size()>2){
+        if(vec[2]=="distinct"){has_unidentified_lits=true;return;}
+        if(vec[2].size()>=5){
+            std::string str_tmp=vec[2].substr(0,5);
+            if(str_tmp=="pbge["||str_tmp=="pbeq["||str_tmp=="pble["){has_unidentified_lits=true;return;}
+        }
+        for(int idx=2;idx<vec.size();idx++){
+            if(vec[idx]=="if"||vec[idx][0]=='#'){has_unidentified_lits=true;return;}
+        }
         l->is_nia_lit=true;
         if(vec.size()>6){
             l->lits_index=std::atoi(vec[0].c_str());
@@ -50,11 +84,13 @@ void ls_solver::build_lits(std::string &in_string){
                             var_exp ve((int)transfer_name_to_tmp_var(vec[idx++]));
                             new_t.var_epxs.push_back(ve);
                         }
+                        modify_term_exp(new_t);//modify term: (* x x y) --> (* x^2 y)
                         l->coff_terms.push_back(coff_term((int)transfer_term_to_idx(new_t),1));
                         if(single_mul){break;}//now the idx at ')'
                     }
                     else{
                         __int128_t coff=std::atoll(vec[idx].c_str());
+                        if(coff>10000000||coff<-10000000){has_unidentified_lits=true;return;}
                         if(vec[++idx]=="("){//( * -1 ( * x y ) )idx at '('
                             idx+=2;
                             while(vec[idx]!=")"){
@@ -66,6 +102,7 @@ void ls_solver::build_lits(std::string &in_string){
                             var_exp ve((int)transfer_name_to_tmp_var(vec[idx]));
                             new_t.var_epxs.push_back(ve);
                         }
+                        modify_term_exp(new_t);
                         l->coff_terms.push_back(coff_term((int)transfer_term_to_idx(new_t),coff));
                         idx++;
                         if(single_mul){break;}// now the idx at ')'
@@ -148,8 +185,8 @@ void ls_solver::merge(int var_idx_1, int var_idx_2,int coff_1,int coff_2){//coff
         fa_coff[fa_1]=fa_coff_2/fa_coff_1;
     }//fa_1=(fa_coff_2/fa_coff_1)*fa_2
 }
-bool cmp_coff_term(coff_term cf1,coff_term cf2){return cf1.term_idx<cf2.term_idx;}
-void ls_solver::equal_vars(std::vector<std::vector<int> >& clause_vec){
+bool cmp_coff_term(const coff_term & cf1,const coff_term & cf2){return cf1.term_idx<cf2.term_idx;}
+void ls_solver::equal_vars(const std::vector<std::vector<int> >& clause_vec){
     fa.resize(_tmp_vars.size());
     for(int var_idx=0;var_idx<_tmp_vars.size();var_idx++){fa[var_idx]=var_idx;}//initialize the fa vec
     fa_coff.resize(_tmp_vars.size(), 1);
@@ -228,16 +265,71 @@ void ls_solver::update_lit_equal(int lit_idx){
                 curr_coff=0;
             }//enter a new term
             curr_coff+=l->coff_terms[cf_idx].coff;//the same term
-            if(cf_idx==l->coff_terms.size()-1||l->coff_terms[cf_idx+1].term_idx!=curr_term_idx){
+            if(curr_coff!=0&&(cf_idx==l->coff_terms.size()-1||l->coff_terms[cf_idx+1].term_idx!=curr_term_idx)){
                 l->coff_terms[lit_coff_term_idx].term_idx=curr_term_idx;
                 l->coff_terms[lit_coff_term_idx++].coff=curr_coff;
             }//the last coff_term of the current term
         }
         l->coff_terms.resize(lit_coff_term_idx);
+        if(lit_coff_term_idx==0){l->lits_index=0;}
     }
 }
 
-void ls_solver::build_instance(std::vector<std::vector<int> >& clause_vec){
+void print_vec(const std::vector<std::vector<int> > & cl){
+    std::cout<<"0\n"<<cl.size()<<'\n';
+    for(auto c:cl){
+        std::cout<<"(";
+        for(auto l:c){std::cout<<" "<<l;}
+        std::cout<<" )\n";
+    }
+}
+
+//delete the duplicate clauses and clause containing unit lits
+void ls_solver::delete_redundant_clauses(std::vector<std::vector<int> >& clause_vec){
+#ifdef LS_DEBUG
+    std::cout<<"start build\n";
+    print_vec(clause_vec);
+#endif
+    std::sort(clause_vec.begin(),clause_vec.end());//sort the clauses according to its literals
+    int n_c=0;
+    for(int cl_idx=0;cl_idx<clause_vec.size();cl_idx++){
+        if(n_c==0||(!is_same_cls(clause_vec[cl_idx],clause_vec[n_c-1]))){clause_vec[n_c++]=clause_vec[cl_idx];}
+    }//delete redundant clauses
+    clause_vec.resize(n_c);
+#ifdef LS_DEBUG
+    std::cout<<"after delete redundant clauses\n";
+    print_vec(clause_vec);
+#endif
+    std::vector<bool> unit_lit(2*_num_lits+_additional_len,false);
+    n_c=0;
+    for(int cl_idx=0;cl_idx<clause_vec.size();cl_idx++){
+        if(clause_vec[cl_idx].size()==1){
+            unit_lit[(clause_vec[cl_idx][0]+_num_lits)]=true;
+        }//unit lit, record it
+    }
+    for(int cl_idx=0;cl_idx<clause_vec.size();cl_idx++){
+        bool has_unit_lit=false;
+        if(clause_vec[cl_idx].size()!=1){
+            for(auto l:clause_vec[cl_idx]){
+                if(unit_lit[l+_num_lits]){
+                    has_unit_lit=true;
+                    break;
+                }//if found unit clause
+            }
+        }
+        if(!has_unit_lit){clause_vec[n_c++]=clause_vec[cl_idx];}//unit or multiple clauses without unit, add it to clauses
+    }
+    clause_vec.resize(n_c);
+#ifdef LS_DEBUG
+    std::cout<<"after delete unit clauses\n";
+    print_vec(clause_vec);
+    std::cout.flush();
+#endif
+}
+
+void ls_solver::build_instance(std::vector<std::vector<int> > clause_vec){
+    if(if_cnt>500){build_unsat=true;}//if there is too many ``if'', then LS should be skipped
+    delete_redundant_clauses(clause_vec);
     equal_vars(clause_vec);
     for(int clause_idx=0;clause_idx<clause_vec.size();clause_idx++){
         if(clause_vec[clause_idx].size()==1){
@@ -248,12 +340,12 @@ void ls_solver::build_instance(std::vector<std::vector<int> >& clause_vec){
                 __int128_t new_upper_bound=max_int;
                 int var_idx=_terms[l->coff_terms[0].term_idx].var_epxs[0].var_index;
                 if(clause_vec[clause_idx][0]>0){
-                    if(l->coff_terms[0].coff>0){new_upper_bound=devide((-l->key),(l->coff_terms[0].coff));}//ax+k<=0   x<=(-k/a)
-                    else{new_low_bound=devide((-l->key),(l->coff_terms[0].coff));}//ax+k<=0  x>=(-k/a)
+                    if(l->coff_terms[0].coff>0){new_upper_bound=std::floor((double)(-l->key)/(double)(l->coff_terms[0].coff));}//ax+k<=0   x<=(-k/a)
+                    else{new_low_bound=std::ceil((double)(-l->key)/(double)(l->coff_terms[0].coff));}//ax+k<=0  x>=(-k/a)
                 }
                 else{
-                    if(l->coff_terms[0].coff>0){new_low_bound=devide((1-l->key),(l->coff_terms[0].coff));}//ax+k>0 ax+k>=1 x>=(1-k)/a
-                    else{new_upper_bound=devide((1-l->key),(l->coff_terms[0].coff));}//ax+k>=1 x<=(1-k)/a
+                    if(l->coff_terms[0].coff>0){new_low_bound=std::ceil((double)(1-l->key)/(double)(l->coff_terms[0].coff));}//ax+k>0 ax+k>=1 x>=(1-k)/a
+                    else{new_upper_bound=std::floor((double)(1-l->key)/(double)(l->coff_terms[0].coff));}//ax+k>=1 x<=(1-k)/a
                 }
                 if(new_low_bound>_tmp_vars[var_idx].low_bound){_tmp_vars[var_idx].low_bound=new_low_bound;}
                 else if(new_upper_bound<_tmp_vars[var_idx].upper_bound){_tmp_vars[var_idx].upper_bound=new_upper_bound;}
@@ -262,6 +354,9 @@ void ls_solver::build_instance(std::vector<std::vector<int> >& clause_vec){
                 if(clause_vec[clause_idx][0]<0){clause_vec[clause_idx][0]=-clause_vec[clause_idx][0];}
             }
         }
+    }
+    for(variable &v_tmp:_tmp_vars){
+        if(v_tmp.low_bound>v_tmp.upper_bound){build_unsat=true;break;}
     }
     reduce_vars();
     _clauses.resize(clause_vec.size());
@@ -301,8 +396,18 @@ uint64_t ls_solver::transfer_term_to_idx(term t){
     }
     else return str2termidx[term_str];
 }
-bool cmp_ve(var_exp ve1,var_exp ve2){
-    return (ve1.exponent<ve2.exponent)||(ve1.exponent==ve2.exponent&&ve1.var_index<ve2.var_index);
+
+//return if there is term with exponent > 2
+bool ls_solver::is_high_coff(){
+    int term_sz=_terms.size();
+    for(term &t:_terms){
+        for(var_exp &ve:t.var_epxs){
+            if(ve.exponent>2){
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 //sort the term var_index and the exponent
@@ -334,7 +439,7 @@ uint64_t ls_solver::transfer_name_to_resolution_var(std::string & name,bool is_n
         variable var;
         var.clause_idxs.reserve(64);
         var.literal_idxs.reserve(64);
-        var.term_idxs.reserve(64);
+        var.term_exps.reserve(64);
         var.var_lit_terms.reserve(64);
         var.var_name=name;
         var.is_nia=is_nia;
@@ -527,17 +632,20 @@ void ls_solver::resolution(){
             uint64_t pos_clause_idx=pos_clauses[i];
             for(int j=0;j<neg_clause_size;j++){
                 uint64_t neg_clause_idx=neg_clauses[j];
+                bool is_tautology_flag=false;
                 for(int k=0;k<_clauses[neg_clause_idx].literals.size();k++){
                     int l_neg_lit=_clauses[neg_clause_idx].literals[k];
                     if(_lits[std::abs(l_neg_lit)].delta!=bool_var_idx||_lits[std::abs(l_neg_lit)].is_nia_lit){//the bool_var for resolution is not considered(that is \neg ( the lit is bool lit and it contains the var))
                         for(int l_pos_lit:_clauses[pos_clause_idx].literals){
                             if(-l_neg_lit==(l_pos_lit)){
-                                tautology_num++;
+                                is_tautology_flag=true;
                                 break;
                             }//if there exists (aVb)^(-aV-b), the new clause is tautology
                         }
                     }
+                    if(is_tautology_flag){break;}
                 }
+                if(is_tautology_flag){tautology_num++;}
             }
         }
         if((pos_clause_size*neg_clause_size-tautology_num)>(pos_clause_size+neg_clause_size)){continue;}//if deleting the var can cause 2 times clauses, then skip it
@@ -641,8 +749,9 @@ void ls_solver::resolution(){
     }
     }
 }
-bool cmp_vlt_by_var(var_lit_term vlt1,var_lit_term vlt2){return vlt1.var_idx<vlt2.var_idx||(vlt1.var_idx==vlt2.var_idx&&vlt1.term_idx<vlt2.term_idx);}
-bool cmp_vlt_by_lit(var_lit_term vlt1,var_lit_term vlt2){return vlt1.lit_idx<vlt2.lit_idx||(vlt1.lit_idx==vlt2.lit_idx&&vlt1.term_idx<vlt2.term_idx);}
+bool cmp_vlt_by_var(const var_lit_term & vlt1, const var_lit_term & vlt2){
+    return vlt1.var_idx<vlt2.var_idx||(vlt1.var_idx==vlt2.var_idx&&vlt1.exponent<vlt2.exponent)||(vlt1.var_idx==vlt2.var_idx&&vlt1.exponent==vlt2.exponent&&vlt1.term_idx<vlt2.term_idx);}
+bool cmp_vlt_by_lit(const var_lit_term & vlt1, const var_lit_term & vlt2){return vlt1.lit_idx<vlt2.lit_idx||(vlt1.lit_idx==vlt2.lit_idx&&vlt1.term_idx<vlt2.term_idx);}
 void ls_solver::reduce_clause(){
     bool_var_vec.clear();
     nia_var_vec.clear();
@@ -658,6 +767,9 @@ void ls_solver::reduce_clause(){
     _num_clauses=reduced_clause_num;
     lit_appear.resize(_num_lits+_additional_len,false);
     term_appear.resize(_terms.size()+_additional_len,false);
+    for(variable &v:_resolution_vars){
+        if(v.is_nia&&v.upper_bound!=max_int&&v.low_bound!=-max_int){transfer_name_to_reduced_var(v.var_name, true);}
+    }//if the var has both upper and lower bound, then it may not exist in any clause, but it should be considered as a var
     for(int clause_idx=0;clause_idx<reduced_clause_num;clause_idx++){
         _clauses[clause_idx].weight=1;
         for(int k=0;k<_clauses[clause_idx].literals.size();k++){
@@ -724,7 +836,7 @@ void ls_solver::reduce_clause(){
             t=&(_terms[term_idx]);
             for(int ve_idx=0;ve_idx<t->var_epxs.size();ve_idx++){
                 uint64_t var_idx=t->var_epxs[ve_idx].var_index;
-                var_lit_term vlt(var_idx,term_idx,l_idx,coff);
+                var_lit_term vlt(t->var_epxs[ve_idx],term_idx,l_idx,coff);
                 _vars[var_idx].var_lit_terms.push_back(vlt);
                 l->var_lit_terms.push_back(vlt);
             }
@@ -749,14 +861,13 @@ void ls_solver::reduce_clause(){
         if(!term_appear[term_idx]){continue;}
         t=&(_terms[term_idx]);
         std::sort(t->var_epxs.begin(),t->var_epxs.end(),cmp_ve);
-        int curr_var_idx=-1;
         for(var_exp &ve:t->var_epxs){
-            _vars[ve.var_index].term_idxs.push_back(term_idx);
-            if(curr_var_idx==ve.var_index){
-                has_high_coff=true;
-                return;
+            _vars[ve.var_index].term_exps.push_back(term_exp(term_idx,ve.exponent));
+            if(ve.exponent==2){
+                // std::cout<<_vars[ve.var_index].var_name<<"\n";
+                var_in_long_term->insert_element(ve.var_index);
             }
-            else{curr_var_idx=ve.var_index;}
+//            else if(ve.exponent>2){has_high_coff=true;}//no longer regard high coff as unsolvable
         }
         if(t->var_epxs.size()>2){for(var_exp &ve:t->var_epxs){var_in_long_term->insert_element(ve.var_index);}}
     }//determine the term_idxs of vars
@@ -764,7 +875,8 @@ void ls_solver::reduce_clause(){
 
 
 void ls_solver::make_space(){
-    _solution.resize(_num_vars+_additional_len);
+    _num_opt*=3;
+    _solution.resize(5*_num_vars+_additional_len);
     _best_solutin.resize(_num_vars+_additional_len);
     tabulist.resize(2*_num_vars+_additional_len,0);
     operation_var_idx_vec.resize(_num_opt+_additional_len);
@@ -778,6 +890,10 @@ void ls_solver::make_space(){
     is_chosen_bool_var.resize(_num_vars+_additional_len,false);
     _lit_make_break.resize(_num_lits+_additional_len,0);
     term_coffs.resize(_terms.size()+_additional_len,0);
+    _best_literal_assignment.resize(_num_lits+_additional_len);
+    _frequency_in_unsat_clauses.resize(_num_lits+_additional_len,0);
+    is_in_unsat_clause.resize(_num_lits+_additional_len,false);
+    lits_in_unsat_clause.resize(_num_lits+_additional_len);
 }
 
 void ls_solver::set_pre_value(){
@@ -806,4 +922,11 @@ void ls_solver::set_pre_value(){
         }//(a==0 OR a==1)
     }
 }
+ls_solver::~ls_solver(){
+        if(unsat_clauses!=NULL) delete  unsat_clauses;
+        if(sat_clause_with_false_literal!=NULL) delete  sat_clause_with_false_literal;//clauses with 0<sat_num<literal_num, from which swap operation are choosen
+        if(contain_bool_unsat_clauses!=NULL)    delete  contain_bool_unsat_clauses;//unsat clause with at least one boolean var
+        if(false_lit_occur!=NULL)   delete  false_lit_occur;//the false lits for choosing critical move
+        if(var_in_long_term!=NULL)  delete  var_in_long_term;
+    }
 }

@@ -104,3 +104,25 @@ tactic * mk_qfnra_nlsat_tactic(ast_manager & m, params_ref const & p) {
             mk_nlsat_tactic(m, p)));
 }
 
+tactic * mk_qfnra_local_search_tactic(ast_manager & m, params_ref const & p) {
+    params_ref purify_p = p;
+    purify_p.set_bool("complete", false);
+    params_ref p_ls = p;
+    p_ls.set_bool("general_local_search", true);
+    params_ref main_p = p;
+    main_p.set_bool("elim_and", true);
+    main_p.set_bool("blast_distinct", true);
+    
+    return 
+        and_then(/* mk_degree_shift_tactic(m, p), */ // may affect full dimensionality detection
+                using_params(mk_purify_arith_tactic(m, p),
+                            purify_p),
+                using_params(mk_simplify_tactic(m, p),
+                            main_p),
+                mk_tseitin_cnf_core_tactic(m, p),
+                using_params(mk_simplify_tactic(m, p),
+                            main_p),
+                mk_nlsat_tactic(m, p_ls));
+
+    // return mk_nlsat_tactic(m, p_ls);
+}
